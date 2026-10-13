@@ -365,7 +365,9 @@ function settingsSheet() {
     <label class="f" style="margin-top:14px">Units</label><div class="seg"><button class="${isLb() ? 'on' : ''}" data-act="unit" data-u="lb">lb / in</button><button class="${!isLb() ? 'on' : ''}" data-act="unit" data-u="kg">kg / cm</button></div>
     <label class="f">Rest timer</label><select id="s_rest">${[30, 45, 60, 90, 120, 150, 180, 240].map(s => `<option value="${s}" ${db.settings.rest === s ? 'selected' : ''}>${s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60 ? s % 60 + 's' : '') : s + 's'}</option>`).join('')}</select>
     <h2>Backup</h2><div class="mute small" style="margin-bottom:8px">Your data lives only on this phone. Export a backup now and then and save it to Files / iCloud Drive.</div>
-    <div class="grid2"><button data-act="export">Export backup</button><button data-act="import">Import backup</button></div>
+    <div class="small" style="margin-bottom:8px">Last backup: <b>${db.settings.lastBackup ? fmtDate(db.settings.lastBackup, true) : 'never'}</b></div>
+    <div class="grid2"><button data-act="export">Download backup</button><button data-act="import">Import backup</button></div>
+    <button class="block" data-act="share" style="margin-top:8px">Share / save to Files…</button>
     <input type="file" id="impfile" accept=".json,application/json" class="hidden">
     <button class="danger block" data-act="reset" style="margin-top:18px">Erase all data</button>`);
 }
@@ -404,11 +406,21 @@ function finishWorkout() {
   db.workouts.push({ id: a.id, name: a.name || 'Workout', start: a.start, end: Date.now(), entries });
   db.active = null; stopRest(); save(); ui.tab = 'history'; ui.hseg = 'log'; render(); toast('Workout saved 🎉');
 }
-function exportData() {
-  const name = `liftlog-backup-${dkey()}.json`, blob = new Blob([JSON.stringify(db, null, 1)], { type: 'application/json' });
-  const file = new File([blob], name, { type: 'application/json' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], title: name }).catch(() => {});
-  else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+function backupFile() {
+  const name = `liftlog-backup-${dkey()}.json`;
+  return { name, blob: new Blob([JSON.stringify(db, null, 1)], { type: 'application/json' }) };
+}
+function markBackup() { db.settings.lastBackup = Date.now(); save(); settingsSheet(); }
+function exportData() { // direct download to the device
+  const { name, blob } = backupFile(), url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  markBackup(); toast('Backup downloaded');
+}
+function shareData() { // iOS share sheet → Save to Files / iCloud / AirDrop
+  const { name, blob } = backupFile(), file = new File([blob], name, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], title: name }).then(markBackup).catch(() => {});
+  else exportData();
 }
 
 document.addEventListener('click', ev => {
@@ -476,6 +488,7 @@ document.addEventListener('click', ev => {
     case 'brange': ui.bRange = +d.d; render(); break;
     case 'unit': db.settings.unit = d.u; save(); settingsSheet(); render(); break;
     case 'export': exportData(); break;
+    case 'share': shareData(); break;
     case 'import': $('#impfile').click(); break;
     case 'reset': if (confirm('Erase ALL workouts, exercises and body data? This cannot be undone.') && confirm('Really erase everything?')) { db = seed(); save(); closeSheet(); ui.page = null; render(); } break;
   }
