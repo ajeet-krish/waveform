@@ -523,4 +523,4 @@ document.addEventListener('change', ev => {
 
 render();
 if (db.active) $('#rest').classList.remove('on');
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
