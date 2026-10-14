@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LiftLog">
+  <rect width="64" height="64" rx="12" fill="#0f1519" />
+  <g transform="translate(10.75 17)">
+    <rect x="0" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="6.25" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="12.5" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="18.75" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="25" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="31.25" y="0" width="5" height="5" fill="#1e2a31" />
+    <rect x="37.5" y="0" width="5" height="5" fill="#f2509b" />
+    <rect x="0" y="6.25" width="5" height="5" fill="#1e2a31" />
+    <rect x="6.25" y="6.25" width="5" height="5" fill="#1e2a31" />
+    <rect x="12.5" y="6.25" width="5" height="5" fill="#1e2a31" />
+    <rect x="18.75" y="6.25" width="5" height="5" fill="#1e2a31" />
+    <rect x="25" y="6.25" width="5" height="5" fill="#21464a" />
+    <rect x="31.25" y="6.25" width="5" height="5" fill="#4fcb8d" />
+    <rect x="37.5" y="6.25" width="5" height="5" fill="#4fcb8d" />
+    <rect x="0" y="12.5" width="5" height="5" fill="#1e2a31" />
+    <rect x="6.25" y="12.5" width="5" height="5" fill="#1e2a31" />
+    <rect x="12.5" y="12.5" width="5" height="5" fill="#1e2a31" />
+    <rect x="18.75" y="12.5" width="5" height="5" fill="#21464a" />
+    <rect x="25" y="12.5" width="5" height="5" fill="#4fcb8d" />
+    <rect x="31.25" y="12.5" width="5" height="5" fill="#4fcb8d" />
+    <rect x="37.5" y="12.5" width="5" height="5" fill="#f2a93b" />
+    <rect x="0" y="18.75" width="5" height="5" fill="#1e2a31" />
+    <rect x="6.25" y="18.75" width="5" height="5" fill="#1e2a31" />
+    <rect x="12.5" y="18.75" width="5" height="5" fill="#21464a" />
+    <rect x="18.75" y="18.75" width="5" height="5" fill="#4fcb8d" />
+    <rect x="25" y="18.75" width="5" height="5" fill="#4fcb8d" />
+    <rect x="31.25" y="18.75" width="5" height="5" fill="#f2a93b" />
+    <rect x="37.5" y="18.75" width="5" height="5" fill="#f2a93b" />
+    <rect x="0" y="25" width="5" height="5" fill="#1e2a31" />
+    <rect x="6.25" y="25" width="5" height="5" fill="#21464a" />
+    <rect x="12.5" y="25" width="5" height="5" fill="#4fcb8d" />
+    <rect x="18.75" y="25" width="5" height="5" fill="#4fcb8d" />
+    <rect x="25" y="25" width="5" height="5" fill="#f2a93b" />
+    <rect x="31.25" y="25" width="5" height="5" fill="#f2a93b" />
+    <rect x="37.5" y="25" width="5" height="5" fill="#f2a93b" />
+  </g>
+</svg>

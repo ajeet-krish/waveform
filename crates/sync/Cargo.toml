@@ -1,0 +1,13 @@
+[package]
+name = "liftlog-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Offline-first sync: outbox apply, last-write-wins, tombstones"
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

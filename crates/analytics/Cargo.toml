@@ -1,0 +1,13 @@
+[package]
+name = "liftlog-analytics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Aggregation queries and metrics for boards, heatmap, and history"
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

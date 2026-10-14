@@ -1,0 +1,77 @@
+/*
+ * LiftLog design tokens: the single source of truth for color, type, and space.
+ *
+ * The palette is earned from the subject. LiftLog is a training telemetry
+ * console: a glass-cockpit display for logged effort. The background is the
+ * instrument slate of a dark cockpit panel, not a stock near-black. Signals
+ * follow instrument convention where hue carries meaning, so each accent has
+ * exactly one job and never decorates.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Console: the housing. Blue-graphite instrument slate, one step up per surface. */
+  --console: #0f1519;
+  --console-raised: #141c21;
+  --console-high: #1a242a;
+
+  /* Etch: hairlines and cell borders, the printed day grid on a log sheet. */
+  --etch: #26333b;
+
+  /* Paper: backlit dial lettering. */
+  --paper: #e8eef1;
+  --paper-dim: #8fa3ad;
+  --paper-faint: #6e848f;
+
+  /* Signal live: flight-director magenta means active, current, do this. */
+  --live: #f2509b;
+  --live-hover: #ff6cb4;
+  --live-ring: rgb(242 80 155 / 0.25);
+
+  /* Signal load: amber means effort, records, caution. */
+  --load: #f2a93b;
+
+  /* Signal steady: phosphor green means completed, on the board, you showed up. */
+  --steady: #4fcb8d;
+
+  /* Effort heat ramp: 0, 1-25, 26-50, 51-75, 76-100 Effort Points per day. */
+  --heat-0: #1e2a31;
+  --heat-1: #21464a;
+  --heat-2: #2e6e5c;
+  --heat-3: #4fcb8d;
+  --heat-4: #f2a93b;
+
+  /* Type: Chakra Petch displays with restraint (wordmark, titles, figures).
+   * IBM Plex Sans carries prose. IBM Plex Mono carries telemetry: labels,
+   * tabular numbers, and controls. */
+  --font-display: "Chakra Petch", "Avenir Next Condensed", "Futura", sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: clamp(1.75rem, 6vw, 2.5rem);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+
+  --radius: 4px;
+  --radius-cell: 2px;
+
+  --bar-height: 56px;
+  --tabbar-height: 60px;
+  --content-max: 68rem;
+
+  --dur-fast: 120ms;
+  --dur-med: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.6, 0.3, 1);
+}

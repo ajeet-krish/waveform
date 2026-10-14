@@ -1,0 +1,73 @@
+# LiftLog Platform
+
+Offline-first lifting, cycling, and climbing tracker for a small friend group. Rust
+(Axum + SQLx) API on Postgres, SolidJS + Vite PWA frontend, in a pnpm + Turbo (JS)
+and Cargo (Rust) monorepo. Weights in kg, lengths in cm, Brzycki e1RM.
+
+## Quick Commands
+
+Backend, Cargo workspace:
+
+- `cargo build --workspace` builds the Rust workspace.
+- `cargo test --workspace` runs all Rust tests (scoring, analytics, sync, db).
+- `cargo clippy --workspace --all-targets -- -D warnings` lints; warnings fail.
+- `cargo fmt --check` verifies formatting.
+- `cargo run -p liftlog-api -- migrate` applies migrations and exits.
+- `cargo run -p liftlog-api` serves the API on port 8080 and applies pending migrations on startup.
+- `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`; commit it, CI fails on drift.
+
+Frontend, pnpm workspace (`apps/web`, `packages/*`):
+
+- `pnpm install` installs JS dependencies (use `npx pnpm@10 install` if pnpm is not global; `packageManager` pins pnpm@10.14.0).
+- `pnpm build` runs the Turbo build pipeline.
+- `pnpm lint` runs the Turbo lint pipeline.
+- `pnpm test` runs the Turbo test pipeline.
+- `pnpm dev` runs the Turbo dev pipeline (persistent, uncached).
+
+Local infra:
+
+- `docker compose -f infra/docker-compose.yml up -d` starts Postgres and Mailpit (dev OTP inbox at http://localhost:8025).
+
+## Conventions
+
+- Rust: 4-space indent, K&R braces; snake_case functions and modules, PascalCase types and traits, SCREAMING_SNAKE_CASE consts.
+- `unsafe_code` is forbidden workspace-wide; clippy warnings are errors in CI.
+- TypeScript and SolidJS: strict TS, no `any`; edit generated API types in Rust, never by hand.
+- SQLx migrations are append-only: one new file per change, never edit an applied one.
+- Store weights in kg and lengths in cm internally; lb and in are display-only.
+- e1RM is Brzycki (`w / (1.0278 - 0.0278 * r)`), defined once in `crates/scoring` and in the `set_entries.e1rm_kg` generated column.
+- Weeks start Monday; device-timezone `local_date` groups heatmap and board days.
+- Conventional Commits. Every change merges through a PR with required CI checks.
+- No em dashes or double hyphens in prose; command flags keep their leading `--`.
+
+## Project Map
+
+- `apps/api` - Axum binary: routers, extractors, handlers, config, state.
+- `apps/web` - SolidJS + Vite PWA (routes, stores, sync, lib/api). Phase 1.
+- `crates/db` - SQLx pool, migration runner, row models (ts-rs), queries.
+- `crates/scoring` - Brzycki e1RM, Effort Points, V-points (pure, unit-tested).
+- `crates/analytics` - aggregation metrics ported from fitness_control_center.
+- `crates/sync` - outbox apply, last-write-wins, tombstone contract.
+- `packages/api-types` - TypeScript types generated from Rust (committed).
+- `packages/ui` - SolidJS components: charts, heatmap grid, body map. Planned.
+- `migrations` - SQLx SQL: `0001_init.sql` (schema), `0002_seed_catalog.sql` (seed).
+- `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml`.
+- `legacy` - v1 vanilla-JS PWA, kept only for the phase 1 import wizard.
+- `docs` - architecture, decision records, research.
+
+## Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, deploy skeleton, auth shell | In Progress |
+| Phase 1 Training core + offline | Workouts, exercises, offline sync, v1 data import | Not started |
+| Phase 2 Activities + body + routines | Cycling, climbing, body stats, routines | Not started |
+| Phase 3 Social | Leaderboards, heatmap, feed, kudos | Not started |
+| Phase 4 Challenges + hardening | Challenges, hardening, backup and restore drill | Not started |
+
+## Deep Docs
+
+- [Architecture](docs/architecture.md) - stack, data model, sync, scoring, phases.
+- [Decisions](docs/decisions.md) - ADRs (stack lock, scoring, PR model).
+- [Research](docs/research.md) - stack evaluation evidence dossier.
+- `docs/reviews.md` and `docs/tests.md` will appear in later phases.
