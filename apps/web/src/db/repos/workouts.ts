@@ -116,7 +116,7 @@ export type WorkoutRepo = {
   remove(id: string): Promise<OutboxOp[]>;
   /** Live sessions whose local_date falls in [from, to], both inclusive. */
   listByDateRange(from: string, to: string): Promise<LocalRow<WorkoutSession>[]>;
-  /** Session with entries in order_index order and sets in set_index order. */
+  /** Session with entries in order_index order and sets in set_index order; undefined when the session is missing or tombstoned. */
   getTree(id: string): Promise<WorkoutTree | undefined>;
   /**
    * Every live session (tombstones excluded) with its live entries and sets,
@@ -254,7 +254,9 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
 
     async getTree(id: string): Promise<WorkoutTree | undefined> {
       const session = await db.workout_sessions.get(id);
-      if (!session) {
+      // A soft-deleted session is as gone as a missing one: the detail
+      // view renders "Session not found" instead of a tombstone.
+      if (!session || session.deleted_at !== null) {
         return undefined;
       }
       return loadTree(db, session);

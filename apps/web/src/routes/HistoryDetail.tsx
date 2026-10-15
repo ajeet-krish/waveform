@@ -195,7 +195,7 @@ function SessionBody(props: {
       <ConfirmDialog
         open={confirmDelete()}
         title="Delete this session?"
-        body="The session, its exercises, and its sets are tombstoned on this device and queued for sync. History will no longer show it."
+        body="The session, its exercises, and its sets are tombstoned on this device. History will no longer show it."
         confirmLabel="Delete session"
         onConfirm={() => {
           setConfirmDelete(false);

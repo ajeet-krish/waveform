@@ -32,7 +32,7 @@ export default function Login() {
       <PageHeader
         path="Account / Sign in"
         title="Sign in"
-        lede="Waveform is invite only. Enter your email, then type the 6 digit code it sends you."
+        lede="Sign-in arrives with the backend: invite only, codes typed by hand. The console works without an account."
       />
       <div class="auth-card">
         <form aria-label="Request a sign-in code" onSubmit={requestCode} novalidate>

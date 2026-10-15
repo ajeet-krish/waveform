@@ -54,6 +54,18 @@ describe("buildOutboxOp", () => {
     const other = buildOutboxOp("exercises", "create", row, now);
     expect(other.op_id).not.toBe(op.op_id);
   });
+
+  it("takes updated_at from lwwAt, not created_at or the import clock", () => {
+    const now = new Date("2026-10-15T09:00:00.000Z");
+    const row = exerciseRow("row-1"); // updated_at 2026-10-14T00:00:00.000Z
+    const lwwAt = "2026-10-13T07:00:00.000Z";
+    const op = buildOutboxOp("exercises", "update", row, now, lwwAt);
+
+    expect(op.updated_at).toBe(lwwAt);
+    expect(op.updated_at).not.toBe(row.updated_at);
+    expect(op.created_at).toBe("2026-10-15T09:00:00.000Z");
+    expect(op.created_at).not.toBe(op.updated_at);
+  });
 });
 
 describe("createOutboxRepo", () => {

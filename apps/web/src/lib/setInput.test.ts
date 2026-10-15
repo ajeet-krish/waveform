@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { parseRepsInput, parseSetInput, parseWeightInput } from "./setInput";
+import {
+  parseRepsInput,
+  parseSetInput,
+  parseWeightInput,
+  weightInputBounds,
+} from "./setInput";
+
+describe("weightInputBounds", () => {
+  it("keeps kg bounds at the CHECK range 0..1500", () => {
+    expect(weightInputBounds("kg")).toEqual({ min: 0, max: 1500 });
+  });
+
+  it("converts the same range to lb for display: 0..3306.9", () => {
+    expect(weightInputBounds("lb")).toEqual({ min: 0, max: 3306.9 });
+  });
+});
 
 describe("parseWeightInput", () => {
   it("accepts kg within the CHECK bounds", () => {
@@ -27,6 +42,16 @@ describe("parseWeightInput", () => {
       ok: false,
       issue: "Enter 1500 kg or less.",
     });
+  });
+
+  it("explains lb out-of-range values in lb", () => {
+    expect(parseWeightInput("3307", "lb")).toEqual({
+      ok: false,
+      issue: "Enter 3306.9 lb or less.",
+    });
+    expect(parseWeightInput("-1", "lb")).toEqual({ ok: false, issue: "Enter 0 or more." });
+    // Just inside the converted bound still lands in the CHECK range.
+    expect(parseWeightInput("3306.9", "lb").ok).toBe(true);
   });
 });
 

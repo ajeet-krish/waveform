@@ -29,7 +29,7 @@ export default function CommandBar() {
         </For>
       </nav>
       <div class="cmd-status">
-        <span class="cmd-chip">sync idle</span>
+        <span class="cmd-chip">local only</span>
         <A href="/profile" class="cmd-profile" aria-label="Profile">
           <Icon name="user" />
         </A>

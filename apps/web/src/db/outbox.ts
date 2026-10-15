@@ -13,13 +13,17 @@ import type { OutboxAction, OutboxEntity, OutboxOp, OutboxRowMap } from "./types
 /**
  * Builds one outbox op. `op_id` is client-generated so replays are
  * idempotent server-side; `created_at` and `updated_at` share `now` so a
- * row and its op always carry the same LWW timestamp.
+ * row and its op always carry the same LWW timestamp. `lwwAt` overrides
+ * `updated_at` for restores: a backup import must push the row's own
+ * last-write-wins truth, not the import time, while `created_at` stays at
+ * import time so the outbox drains in import order.
  */
 export function buildOutboxOp<E extends OutboxEntity>(
   entity: E,
   action: OutboxAction,
   row: OutboxRowMap[E],
   now: Date,
+  lwwAt?: string,
 ): OutboxOp<E> {
   const iso = now.toISOString();
   return {
@@ -27,7 +31,7 @@ export function buildOutboxOp<E extends OutboxEntity>(
     entity,
     action,
     payload: row,
-    updated_at: iso,
+    updated_at: lwwAt ?? iso,
     created_at: iso,
   };
 }

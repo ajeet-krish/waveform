@@ -14,7 +14,7 @@ export default function SocialLayout(props: RouteSectionProps) {
       <PageHeader
         path="Group / Social"
         title="Social"
-        lede="Boards, the effort grid, and your group's feed. Everything here stays inside your invite group; nothing is public."
+        lede="Boards, the effort grid, and your group's feed. Your group's boards and feed arrive in Phase 3."
       />
       <nav class="seg" aria-label="Social views">
         <For each={SUB_SECTIONS}>

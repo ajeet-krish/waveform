@@ -57,10 +57,10 @@ export default function Leaderboard() {
       </div>
 
       <EmptyState
-        title="The boards are waiting on the first synced session"
+        title="The boards arrive with the backend"
         body="Ranks fill in as soon as anyone in your group finishes a session. Ties share a rank, so nobody loses a spot to a coin flip."
         actions={[{ label: "Log a session", href: "/workout" }]}
-        note="Boards read from the server: they always show the latest synced state"
+        note="Boards read from the server once it exists"
       />
     </div>
   );

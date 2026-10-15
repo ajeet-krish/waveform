@@ -367,6 +367,23 @@ describe("workouts repo", () => {
     expect(await repos.workouts.getTree("missing-workout")).toBeUndefined();
   });
 
+  it("getTree returns undefined once the session is removed", async () => {
+    const { repos } = harness("tree-removed");
+    const workout = await repos.workouts.create({ local_date: "2026-10-14" });
+    await repos.workouts.addEntry({
+      workout_id: workout.row.id,
+      exercise_id: "exercise-1",
+      order_index: 0,
+    });
+    expect(await repos.workouts.getTree(workout.row.id)).toBeDefined();
+
+    await repos.workouts.remove(workout.row.id);
+
+    // Soft-deleted sessions read as gone, same as a missing id.
+    expect(await repos.workouts.getTree(workout.row.id)).toBeUndefined();
+    expect(await repos.workouts.getTree("missing-workout")).toBeUndefined();
+  });
+
   it("listAllTrees sorts local_date desc then id desc and skips tombstones", async () => {
     const { db, repos } = harness("all-trees-order");
     const stamp = "2026-10-14T00:00:00.000Z";

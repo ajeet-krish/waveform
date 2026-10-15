@@ -83,6 +83,8 @@
 
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   margin-bottom: var(--space-4);
   border: 1px solid var(--etch);
   border-radius: var(--radius);
@@ -528,6 +530,63 @@ a.discipline:hover {
   margin-top: var(--space-2);
 }
 
+/* File input: the native control wearing the console's input chrome. */
+
+.input[type="file"] {
+  padding: 0.5rem 0.75rem;
+}
+
+.input[type="file"]::file-selector-button {
+  margin-right: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--console-raised);
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.input[type="file"]::file-selector-button:hover {
+  border-color: var(--live);
+}
+
+/* Storage alert: a quota bar in the load amber, actions on the right. */
+
+.storage-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--console-raised);
+  border: 1px solid var(--etch);
+  border-left: 2px solid var(--load);
+  border-radius: var(--radius);
+}
+
+.storage-alert-text {
+  flex: 1 1 20rem;
+  max-width: 56ch;
+  color: var(--paper);
+  font-size: var(--text-sm);
+}
+
+.storage-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.storage-alert-note {
+  flex-basis: 100%;
+  color: var(--paper-dim);
+  font-size: var(--text-sm);
+}
+
+
 .divider {
   display: flex;
   align-items: center;
@@ -641,6 +700,17 @@ a.discipline:hover {
   margin-top: var(--space-2);
   color: var(--paper-dim);
   font-size: var(--text-sm);
+}
+
+/* Type-to-confirm guard: label above a full-width input. */
+.dialog-phrase {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.dialog-phrase .input {
+  width: 100%;
 }
 
 .dialog-actions {

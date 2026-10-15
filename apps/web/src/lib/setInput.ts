@@ -8,7 +8,7 @@
  */
 
 import { SET_RULES } from "../db/validation";
-import { toKg, type WeightUnit } from "./format";
+import { toDisplayWeight, toKg, type WeightUnit } from "./format";
 
 export type WeightParse = { ok: true; weight_kg: number } | { ok: false; issue: string };
 
@@ -17,6 +17,19 @@ export type RepsParse = { ok: true; reps: number } | { ok: false; issue: string 
 export type SetParse =
   | { ok: true; weight_kg: number; reps: number }
   | { ok: false; issues: string[] };
+
+/**
+ * The SET_RULES weight bounds as the user sees them: kg passes through
+ * (0..1500), lb is the same stored range converted for display
+ * (0..3306.9). Input validation and any input hint agree because both
+ * read these numbers.
+ */
+export function weightInputBounds(unit: WeightUnit): { min: number; max: number } {
+  return {
+    min: toDisplayWeight(SET_RULES.weightMinKg, unit),
+    max: toDisplayWeight(SET_RULES.weightMaxKg, unit),
+  };
+}
 
 /** Parses a display-unit weight into stored kg, or explains the rejection. */
 export function parseWeightInput(text: string, unit: WeightUnit): WeightParse {
@@ -29,11 +42,12 @@ export function parseWeightInput(text: string, unit: WeightUnit): WeightParse {
     return { ok: false, issue: "Enter a number." };
   }
   const weightKg = toKg(value, unit);
+  const bounds = weightInputBounds(unit);
   if (weightKg < SET_RULES.weightMinKg) {
-    return { ok: false, issue: `Enter ${SET_RULES.weightMinKg} or more.` };
+    return { ok: false, issue: `Enter ${bounds.min} or more.` };
   }
   if (weightKg > SET_RULES.weightMaxKg) {
-    return { ok: false, issue: `Enter ${SET_RULES.weightMaxKg} kg or less.` };
+    return { ok: false, issue: `Enter ${bounds.max} ${unit} or less.` };
   }
   return { ok: true, weight_kg: weightKg };
 }

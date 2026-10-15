@@ -2,7 +2,7 @@ import { e1rmBrzycki } from "@waveform/scoring";
 import { createUniqueId, createSignal, Index, Show } from "solid-js";
 import { SET_RULES } from "../../db/validation";
 import { formatE1rm, toDisplayWeight, type WeightUnit } from "../../lib/format";
-import { parseRepsInput, parseSetInput, parseWeightInput } from "../../lib/setInput";
+import { parseRepsInput, parseSetInput, parseWeightInput, weightInputBounds } from "../../lib/setInput";
 import type { DraftSetInput } from "../../lib/workoutLog";
 import type { WorkoutDraftEntry, WorkoutDraftSet } from "../../db/types";
 
@@ -22,7 +22,9 @@ type SetLogProps = {
 /**
  * One exercise slot's sets: an editable telemetry table plus the add-set
  * form. Every keystroke is parsed against SET_RULES before a reducer
- * touches the draft, so a half-typed number can never reach the log.
+ * touches the draft, so a half-typed number can never reach the log, and
+ * the weight inputs carry display-unit min/max from weightInputBounds
+ * so the native constraints match the unit on the label.
  */
 export default function SetLog(props: SetLogProps) {
   const [weightText, setWeightText] = createSignal("");
@@ -95,8 +97,8 @@ export default function SetLog(props: SetLogProps) {
             type="number"
             inputMode="decimal"
             step="any"
-            min={SET_RULES.weightMinKg}
-            max={SET_RULES.weightMaxKg}
+            min={weightInputBounds(props.unit).min}
+            max={weightInputBounds(props.unit).max}
             placeholder={props.unit}
             value={weightText()}
             onInput={(event) => setWeightText(event.currentTarget.value)}
@@ -206,8 +208,8 @@ function SetRow(props: {
           type="number"
           inputMode="decimal"
           step="any"
-          min={SET_RULES.weightMinKg}
-          max={SET_RULES.weightMaxKg}
+          min={weightInputBounds(props.unit).min}
+          max={weightInputBounds(props.unit).max}
           aria-label={`${label} weight in ${props.unit}`}
           aria-invalid={weightError() ? "true" : undefined}
           aria-describedby={weightError() ? weightHintId : undefined}

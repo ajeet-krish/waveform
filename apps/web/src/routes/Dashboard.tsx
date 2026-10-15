@@ -93,7 +93,7 @@ export default function Dashboard(): JSX.Element {
 
         <Panel label="On the boards">
           <p class="panel-note">
-            Boards open when the first session syncs. Consistency counts active days and breaks
+            Boards open when the backend lands. Consistency counts active days and breaks
             ties on weekly streaks.
           </p>
           <A class="link" href="/social/leaderboard">

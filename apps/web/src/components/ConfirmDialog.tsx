@@ -1,4 +1,4 @@
-import { createUniqueId, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, createUniqueId, onCleanup, onMount, Show } from "solid-js";
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -6,6 +6,12 @@ export type ConfirmDialogProps = {
   body?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /**
+   * When set, the dialog demands this exact phrase typed into a text
+   * input before Confirm unlocks, a guard for irreversible actions like
+   * wiping the log with a replace import.
+   */
+  confirmPhrase?: string;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -18,6 +24,7 @@ export type ConfirmDialogProps = {
 export default function ConfirmDialog(props: ConfirmDialogProps) {
   const titleId = createUniqueId();
   const bodyId = createUniqueId();
+  const phraseId = createUniqueId();
   return (
     <Show when={props.open}>
       <ConfirmLayer
@@ -25,10 +32,12 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
         body={props.body}
         confirmLabel={props.confirmLabel}
         cancelLabel={props.cancelLabel}
+        confirmPhrase={props.confirmPhrase}
         onConfirm={props.onConfirm}
         onCancel={props.onCancel}
         titleId={titleId}
         bodyId={bodyId}
+        phraseId={phraseId}
       />
     </Show>
   );
@@ -37,12 +46,17 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
 type ConfirmLayerProps = Omit<ConfirmDialogProps, "open"> & {
   titleId: string;
   bodyId: string;
+  phraseId: string;
 };
 
 function ConfirmLayer(props: ConfirmLayerProps) {
   let dialogRef: HTMLDivElement | undefined;
   let cancelRef: HTMLButtonElement | undefined;
   let previous: HTMLElement | null = null;
+  const [phrase, setPhrase] = createSignal("");
+
+  const phraseMatches = () =>
+    props.confirmPhrase === undefined || phrase() === props.confirmPhrase;
 
   const focusables = (): HTMLElement[] => {
     const root = dialogRef;
@@ -121,6 +135,23 @@ function ConfirmLayer(props: ConfirmLayerProps) {
             {props.body}
           </p>
         </Show>
+        <Show when={props.confirmPhrase !== undefined}>
+          <div class="dialog-phrase">
+            <label class="label" for={props.phraseId}>
+              Type {props.confirmPhrase} to confirm
+            </label>
+            <input
+              id={props.phraseId}
+              class="input"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck={false}
+              value={phrase()}
+              onInput={(event) => setPhrase(event.currentTarget.value)}
+            />
+          </div>
+        </Show>
         <div class="dialog-actions">
           <button
             type="button"
@@ -132,7 +163,12 @@ function ConfirmLayer(props: ConfirmLayerProps) {
           >
             {props.cancelLabel ?? "Cancel"}
           </button>
-          <button type="button" class="btn btn-primary" onClick={props.onConfirm}>
+          <button
+            type="button"
+            class="btn btn-primary"
+            disabled={!phraseMatches()}
+            onClick={props.onConfirm}
+          >
             {props.confirmLabel ?? "Confirm"}
           </button>
         </div>

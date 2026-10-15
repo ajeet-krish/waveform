@@ -41,7 +41,7 @@ export default function Workout(): JSX.Element {
       <PageHeader
         path="Training / Workout"
         title="Workout"
-        lede="Log sets as you go. The in-progress session stays on this device until you finish it, then it syncs when you are back online."
+        lede="Log sets as you go. The in-progress session stays on this device until you finish it, then it is saved to this device's log."
       />
       <Show
         when={app.repos()}
@@ -262,7 +262,7 @@ function StartCard(props: { onStart(): void }): JSX.Element {
     <div class="stack">
       <EmptyState
         title="No session in progress"
-        body="Start an empty session and log sets as you go. Everything stays on this device until you finish, then it syncs with your group."
+        body="Start an empty session and log sets as you go. Everything stays on this device until you finish, then it lands in your history."
         actions={[
           { label: "Start empty session", onClick: props.onStart, variant: "primary" },
         ]}

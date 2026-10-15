@@ -85,3 +85,11 @@ export function downloadBackup(backup: WaveformBackupV2): void {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Collects the whole local log and hands it to the user as one file, in
+ * one call: the path a low-storage alert or a Profile button triggers.
+ */
+export async function exportBackupNow(db: WaveformDb): Promise<void> {
+  downloadBackup(await collectBackup(db));
+}
