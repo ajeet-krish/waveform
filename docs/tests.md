@@ -28,7 +28,9 @@ vector fails both suites, so the two implementations cannot silently diverge.
   and daily Effort Points identically in TypeScript and Rust; one edited expected value fails both
   suites.
 - **Catalog migration parity**: `catalogParity.test.ts` parses `migrations/0002_seed_catalog.sql`
-  and fails on any content or order drift from the 118-row `CATALOG_SEED`.
+  and fails on any content or order drift from `CATALOG_SEED` (the 118 seeded rows minus the seven
+  names `migrations/0004_catalog_cleanup.sql` retires), plus drift between `CATALOG_REMOVED_NAMES`
+  and that cleanup migration's list.
 - **Outbox atomicity**: `repos.test.ts` commits a draft with one invalid set and asserts every
   table and the outbox roll back together, with the draft untouched. Repo writes and their ops
   share one IndexedDB transaction.

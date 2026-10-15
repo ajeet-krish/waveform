@@ -1,11 +1,15 @@
 /**
  * The global exercise catalog, transcribed from
- * migrations/0002_seed_catalog.sql IN FILE ORDER.
+ * migrations/0002_seed_catalog.sql IN FILE ORDER, minus the seven rows
+ * retired by migrations/0004_catalog_cleanup.sql (listed in
+ * CATALOG_REMOVED_NAMES below). The full migration still seeds 118 rows;
+ * the live catalog after the 0004 cleanup is the 111 rows seen here.
  *
  * Order matters: the first rows are the v1 legacy names from
  * legacy/app.js, which the phase 1 import wizard maps legacy history
- * onto. The parity test in catalogParity.test.ts parses the migration and
- * fails if this array and the SQL ever drift apart in content or order.
+ * onto. The parity test in catalogParity.test.ts parses both migrations
+ * and fails if this array and the SQL ever drift apart in content or in
+ * order, including a drift between this list and the cleanup migration.
  */
 
 export type CatalogSeedRow = {
@@ -68,24 +72,19 @@ export const CATALOG_SEED: readonly CatalogSeedRow[] = [
   { name: "Hanging Leg Raise", muscle_group: "core", equipment: "bodyweight" },
   { name: "Cable Crunch", muscle_group: "core", equipment: "cable" },
   { name: "Russian Twist", muscle_group: "core", equipment: "bodyweight" },
-  { name: "Ab Wheel", muscle_group: "core", equipment: "other" },
   { name: "Flat Barbell Bench Press", muscle_group: "chest", equipment: "barbell" },
-  { name: "Incline Barbell Bench Press", muscle_group: "chest", equipment: "barbell" },
   { name: "Decline Barbell Bench Press", muscle_group: "chest", equipment: "barbell" },
   { name: "Flat Dumbbell Press", muscle_group: "chest", equipment: "dumbbell" },
   { name: "Incline Dumbbell Press", muscle_group: "chest", equipment: "dumbbell" },
   { name: "Decline Dumbbell Press", muscle_group: "chest", equipment: "dumbbell" },
   { name: "Incline Cable Fly", muscle_group: "chest", equipment: "cable" },
   { name: "Dumbbell Fly", muscle_group: "chest", equipment: "dumbbell" },
-  { name: "Chest Dips", muscle_group: "chest", equipment: "bodyweight" },
   { name: "Push-ups", muscle_group: "chest", equipment: "bodyweight" },
   { name: "Pec Deck Fly", muscle_group: "chest", equipment: "machine" },
   { name: "Barbell Row", muscle_group: "back", equipment: "barbell" },
   { name: "Pendlay Row", muscle_group: "back", equipment: "barbell" },
-  { name: "Dumbbell Row", muscle_group: "back", equipment: "dumbbell" },
   { name: "Single Arm Dumbbell Row", muscle_group: "back", equipment: "dumbbell" },
   { name: "Pull-ups", muscle_group: "back", equipment: "bodyweight" },
-  { name: "Chin-ups", muscle_group: "back", equipment: "bodyweight" },
   { name: "Straight Arm Pulldown", muscle_group: "back", equipment: "cable" },
   { name: "Machine Row", muscle_group: "back", equipment: "machine" },
   { name: "Hyperextension", muscle_group: "back", equipment: "bodyweight" },
@@ -96,11 +95,9 @@ export const CATALOG_SEED: readonly CatalogSeedRow[] = [
   { name: "Overhead Press", muscle_group: "shoulders", equipment: "barbell" },
   { name: "Seated Dumbbell Press", muscle_group: "shoulders", equipment: "dumbbell" },
   { name: "Standing Dumbbell Press", muscle_group: "shoulders", equipment: "dumbbell" },
-  { name: "Lateral Raise", muscle_group: "shoulders", equipment: "dumbbell" },
   { name: "Reverse Pec Deck", muscle_group: "shoulders", equipment: "machine" },
   { name: "Machine Shoulder Press", muscle_group: "shoulders", equipment: "machine" },
   { name: "EZ Bar Curl", muscle_group: "biceps", equipment: "barbell" },
-  { name: "Dumbbell Curl", muscle_group: "biceps", equipment: "dumbbell" },
   { name: "Incline Dumbbell Curl", muscle_group: "biceps", equipment: "dumbbell" },
   { name: "Concentration Curl", muscle_group: "biceps", equipment: "dumbbell" },
   { name: "Cable Curl", muscle_group: "biceps", equipment: "cable" },
@@ -133,4 +130,29 @@ export const CATALOG_SEED: readonly CatalogSeedRow[] = [
   { name: "Climbing", muscle_group: "other", equipment: "other" },
   { name: "Stretching", muscle_group: "other", equipment: "other" },
   { name: "Foam Rolling", muscle_group: "other", equipment: "other" },
+];
+
+/**
+ * Global catalog rows retired by migrations/0004_catalog_cleanup.sql:
+ * duplicate names (plural or reworded twins of entries that stay in
+ * CATALOG_SEED) being soft-deleted in the cleanup. Order is alphabetical
+ * so the list is stable across edits.
+ *
+ * 0004 tombstones these rows server-side; ensureCatalog mirrors the same
+ * soft-delete on every call so devices that seeded the pre-cleanup
+ * 118-row list converge on the 111 live rows without touching custom
+ * exercises and without writing outbox ops. History resolves exercise
+ * names from raw rows including tombstones, so old entries keep their
+ * display name. catalogParity.test.ts asserts this list against both
+ * migrations: every name must exist in 0002, and the 0004 cleanup list
+ * must match here exactly, so neither side can drift alone.
+ */
+export const CATALOG_REMOVED_NAMES: readonly string[] = [
+  "Ab Wheel",
+  "Chest Dips",
+  "Chin-ups",
+  "Dumbbell Curl",
+  "Dumbbell Row",
+  "Incline Barbell Bench Press",
+  "Lateral Raise",
 ];

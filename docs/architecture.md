@@ -101,11 +101,14 @@ weight 0..1500 kg; `ACTIVITY_RULES` duration 0..1440, grade 0..16, routes >= 0; 
 weight > 0, bodyfat 0..100), so a bad row fails inside the writing transaction instead of at
 sync-push time. The form layer validates against the same constants.
 
-**Catalog seed** (`seed/`): `CATALOG_SEED` transcribes the 118-row global catalog in file order
-from `0002_seed_catalog.sql`; `ensureCatalog` bulk-inserts it idempotently when a device has none
-(no ops); `catalogSeedId` derives a deterministic RFC 4122 UUIDv5 over `lower(name)`, mirroring
-the SQL `lower(name)` unique key. `catalogParity.test.ts` parses the migration and fails on any
-content or order drift.
+**Catalog seed** (`seed/`): `CATALOG_SEED` transcribes the 111 live global catalog rows in file
+order from `0002_seed_catalog.sql`, which seeds 118 rows; the seven duplicates that
+`0004_catalog_cleanup.sql` soft-deletes are named in `CATALOG_REMOVED_NAMES` and absent here.
+`ensureCatalog` bulk-inserts the seed idempotently when a device has none, then reconciles the
+retired names on every bootstrap (neither step writes ops); `catalogSeedId` derives a
+deterministic RFC 4122 UUIDv5 over `lower(name)`, mirroring the SQL `lower(name)` unique key.
+`catalogParity.test.ts` parses both migrations and fails on any content or order drift, including
+drift between `CATALOG_REMOVED_NAMES` and the 0004 cleanup list.
 
 **Reactive bridge** (`query.ts`): `createLocalQuery(querier)` materializes a Dexie `liveQuery`
 into Solid signals (`latest`, `error`, `loading`) and unsubscribes on cleanup; `observeQuery` is
