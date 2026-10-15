@@ -1,76 +1,111 @@
-# Waveform: Training Tracker
+# Waveform: Offline-first training tracker for lifting, climbing, and cycling
 
-Your training log for lifting, climbing, and cycling, running entirely in your browser.
+[![Live on GitHub Pages](https://img.shields.io/badge/Live-GitHub%20Pages-2ea44f.svg)](https://ajeet-krish.github.io/waveform/)
+[![SolidJS](https://img.shields.io/badge/SolidJS-1.9-2c4f7c.svg?logo=solid&logoColor=white)](https://www.solidjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Rust](https://img.shields.io/badge/Rust-2021-000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Open it here: https://ajeet-krish.github.io/waveform/
+Waveform is a training log for lifting, climbing, and cycling that runs entirely in your browser. Every workout, climb, ride, and body reading is stored on your own device in IndexedDB, so the app opens quickly, keeps working without a network, and leaves your numbers under your control. You can install it on your phone as a PWA and it behaves like a native app, with no account and no sign-in.
 
-Waveform keeps every workout, climb, ride, and body reading on your own device.
+---
 
-## What you can do
+## Demo
 
-### Workouts
+Waveform is live at https://ajeet-krish.github.io/waveform/.
 
-Start a session, add exercises from the catalog or invent your own, and log each set by weight and reps. As you type, Waveform shows a live e1RM estimate so you can see the strength behind the numbers, not just the numbers. A session in progress saves itself as a draft, so a reload or a closed tab will not cost you the work. When you are done, finish the session or discard it.
+![Waveform dashboard showing the week at a glance](docs/screenshots/dashboard.png)
+
+*The dashboard gives you the week at a glance: sessions completed, volume lifted, and active days.*
+
+---
+
+## Key Capabilities
+
+- **Offline-first storage**: every record lives in IndexedDB on your device, so the app loads without a network and keeps working when the connection drops.
+- **Installable PWA**: add Waveform to your home screen, launch it from an icon, and use it offline after the first load.
+- **Workout logging**: add exercises, log each set by weight and reps, and read a live Brzycki e1RM estimate as you type.
+- **Draft sessions that autosave**: a session in progress saves itself, so a reload or a closed tab does not cost you the work.
+- **Monday-start history**: sessions group into weeks that begin on Monday, with a detail view for each session.
+- **Exercise catalog**: over a hundred movements out of the box, and custom exercises you create become part of your catalog.
+- **Climbing with V-points**: record how many problems you sent at each V grade and let Waveform score the session in V-points.
+- **Cycling rides**: capture distance, elevation, and duration in the same history as your lifting and climbing.
+- **Body stats with a weight trend**: track weight, body fat, and tape circumferences, with a trend line so the direction matters more than any single day.
+- **Week-at-a-glance dashboard**: see sessions, volume, and active days for the current week in one place.
+- **Editable units**: switch between kg and lb for weight and cm and in for lengths whenever you like.
+- **JSON backup export and import**: export everything as JSON and import it to restore or move your data.
+
+---
+
+## Application Walkthrough
+
+Screenshots below are placeholders, to be captured from the live app.
+
+### Dashboard
+
+The dashboard opens on the current week, with session count, total volume lifted, and active days so you can see how the week is going before you dig into any single session.
+
+![Dashboard screen with the week at a glance](docs/screenshots/dashboard.png)
+
+*The dashboard sums up the week: sessions, volume lifted, and active days.*
+
+### Workout
+
+Start a session, add exercises from the catalog or create your own, and log every set by weight and reps. As you type, Waveform shows a live e1RM estimate labeled as Brzycki, so you can see the strength behind the numbers. A session in progress saves itself as a draft, and when you are done you finish it or discard it.
+
+![Workout screen with exercises and sets](docs/screenshots/workout.png)
+
+*Logging a workout, with the exercise list, the sets entered so far, and the live e1RM reading.*
+
+### History
+
+History is grouped into Monday-start weeks, with a day heading for each session. Open any session for the full detail, or delete it behind a confirmation.
+
+![History screen grouped by weeks](docs/screenshots/history.png)
+
+*History is grouped into Monday-start weeks, with a detail view for each session.*
+
+### Exercises
+
+Browse the catalog of over a hundred movements, covering the usual lifts plus plenty of variations. Search by name, open an exercise to see its history, and add a custom movement when something is missing.
+
+![Exercises screen showing the catalog](docs/screenshots/exercises.png)
+
+*The exercise catalog, plus any custom movements you have added.*
 
 ### Climbing
 
 Log a climbing session by picking a date and recording how many problems you sent at each V grade. Waveform turns those sends into V-points, a simple score that rewards harder grades, so a good session adds up to something you can compare over time.
 
+![Climbing screen with V grade counts](docs/screenshots/climbing.png)
+
+*Climbing sessions count sends per V grade and total the V-points.*
+
 ### Cycling
 
 Record a ride with distance, elevation, and duration. It is a plain, honest ride log that sits alongside your lifting and climbing in the same history.
+
+![Cycling screen with a ride entry](docs/screenshots/cycling.png)
+
+*A cycling ride, captured with distance, elevation, and duration.*
 
 ### Body
 
 Track weight, body fat, and tape circumferences such as arms, chest, and waist. You keep one reading per day, and Waveform draws a weight trend so the direction matters more than any single day.
 
-### Dashboard
+![Body screen showing stats and weight trend](docs/screenshots/body.png)
 
-Get a week at a glance: how many sessions you completed, how much volume you lifted, and how many days you were active. It is the fast answer to "how did this week go?"
+*Body stats with one reading per day and a weight trend over time.*
 
-### Exercises
-
-Browse a catalog of well over a hundred movements, covering the usual lifts and plenty of variations. If something is missing, create a custom exercise and it becomes part of your catalog.
-
-### Backup and settings
+### Profile and backup
 
 Set your display name and choose kg or lb for weight and cm or in for lengths. Your data never leaves the device on its own, so Waveform also gives you a JSON backup you can export and later import to bring everything back.
 
-## Screenshots
-
-These images are placeholders, to be captured from the live app.
-
-![Dashboard screen showing the week at a glance](docs/screenshots/dashboard.png)
-
-The dashboard sums up the week: sessions, volume lifted, and active days.
-
-![Workout screen with exercises and sets](docs/screenshots/workout.png)
-
-Logging a workout, with exercises, sets, and the live e1RM reading.
-
-![History screen grouped by weeks](docs/screenshots/history.png)
-
-History is grouped into Monday-start weeks, with a detail view for each session.
-
-![Exercises screen showing the catalog](docs/screenshots/exercises.png)
-
-The exercise catalog, plus any custom movements you have added.
-
-![Climbing screen with V grade counts](docs/screenshots/climbing.png)
-
-Climbing sessions count sends per V grade and total the V-points.
-
-![Cycling screen with a ride entry](docs/screenshots/cycling.png)
-
-A cycling ride, captured with distance, elevation, and duration.
-
-![Body screen showing stats and weight trend](docs/screenshots/body.png)
-
-Body stats with one reading per day and a weight trend over time.
-
 ![Profile and settings screen](docs/screenshots/profile.png)
 
-Settings for your name, units, and the JSON backup tools.
+*Settings for your name, units, and the JSON backup tools.*
+
+---
 
 ## Step by step
 
@@ -129,18 +164,92 @@ Settings for your name, units, and the JSON backup tools.
 2. Use Add to Home Screen.
 3. Launch it from the icon. It works offline after the first load.
 
+---
+
+## Architecture
+
+```
+waveform/
+  apps/
+    api/                  # Rust Axum API (planned): routers, extractors, handlers, config
+    web/                  # SolidJS + Vite PWA, the shipped app
+      public/             # PWA icons and favicon
+      src/
+        components/       # shell, panels, forms, charts, activity and body widgets
+        db/               # IndexedDB core: Dexie schema, repos, outbox, seed
+          repos/          # workouts, exercises, activities, body, drafts, profile
+          seed/           # exercise catalog seed and UUIDv5 helpers
+        lib/              # view models and helpers: week stats, history, backup, import
+        routes/           # Dashboard, Workout, History, Exercises, Climbing, Cycling, Body, Profile
+        styles/           # design tokens and app CSS
+  crates/
+    analytics/            # aggregation metrics
+    db/                   # SQLx pool, migration runner, row models (ts-rs)
+    scoring/              # Brzycki e1RM, Effort Points, V-points
+    sync/                 # outbox apply, last-write-wins, tombstone contract
+  packages/
+    api-types/            # TypeScript types generated from Rust
+    scoring/              # TypeScript scoring plus the shared golden vectors
+  migrations/             # SQLx SQL: init, catalog seed, hardening, catalog cleanup and dedup
+  infra/                  # docker-compose (Postgres + Mailpit), railway.toml
+  docs/                   # architecture, decisions, research, reviews, tests
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | SolidJS + Vite PWA |
+| **Language** | TypeScript 5.9 |
+| **Data** | IndexedDB via Dexie |
+| **Backend (planned)** | Rust with Axum, SQLx, Postgres |
+| **Build** | pnpm + Turborepo (JS), Cargo (Rust) |
+| **Testing** | Vitest (web and scoring), cargo test (Rust) |
+| **Hosting** | GitHub Pages |
+
+---
+
+## Quick Start
+
+```bash
+# JavaScript workspace (apps/web, packages/*)
+npx pnpm@10 install
+npx pnpm@10 dev      # dev server
+npx pnpm@10 build    # Turbo build pipeline
+npx pnpm@10 lint     # Turbo lint pipeline
+npx pnpm@10 test     # Turbo test pipeline
+
+# Rust workspace (apps/api, crates/*)
+cargo build --workspace
+cargo test --workspace
+```
+
+See [AGENTS.md](AGENTS.md) for the full command list and project conventions, and the `docs/` folder for depth: [architecture](docs/architecture.md), [decisions](docs/decisions.md), [research](docs/research.md), [reviews](docs/reviews.md), and [tests](docs/tests.md).
+
+---
+
+## Testing
+
+| Suite | Files | Tests | Notes |
+|-------|-------|-------|-------|
+| Web (`apps/web`) | 35 | 330 | Vitest over the IndexedDB core and the lib view models |
+| Scoring (`packages/scoring`) | 4 | 42 | Brzycki, climbing, effort, and the golden fence |
+| Rust workspace | 4 crates | 84 | Unit and integration tests across the crates |
+
+The scoring golden fence spans both languages. `packages/scoring/golden/scoring.golden.json` is replayed by the TypeScript suite and by `crates/scoring/tests/golden.rs`, so flipping one vector fails both and the two implementations cannot silently diverge.
+
+---
+
 ## Good to know
 
 - Your data lives on this device. Export a backup after big weeks so nothing is ever only in one place.
 - There is no account yet, which is also why the app needs no sign-in.
 - Later phases add accounts, cross-device sync, and the group features such as leaderboards, a heatmap, and a feed.
 
-## For developers
+---
 
-Waveform is a monorepo. The frontend is a SolidJS and Vite PWA, and the backend is Rust with Axum, SQLx, and Postgres. JavaScript packages use pnpm and Turbo, and the Rust side uses Cargo.
+## License
 
-- `pnpm install`, `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm dev` for the JS workspace.
-- `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt` for the Rust workspace.
-- `cargo test export_ts` regenerates the API types.
-
-See [AGENTS.md](AGENTS.md) for commands and conventions, and the `docs/` folder for depth: [architecture](docs/architecture.md), [decisions](docs/decisions.md), and [tests](docs/tests.md).
+Waveform is released under the MIT License.
