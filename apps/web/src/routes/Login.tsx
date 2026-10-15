@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import Logo from "../components/Logo";
 import PageHeader from "../components/PageHeader";
 
 const REQUEST_STATUS =
@@ -25,6 +26,9 @@ export default function Login() {
 
   return (
     <div class="page">
+      <div class="login-mark">
+        <Logo height={28} />
+      </div>
       <PageHeader
         path="Account / Sign in"
         title="Sign in"

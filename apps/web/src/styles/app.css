@@ -375,6 +375,10 @@ a.discipline:hover {
 
 /* Login */
 
+.login-mark {
+  margin-bottom: var(--space-3);
+}
+
 .auth-card {
   max-width: 27rem;
   padding: var(--space-5) var(--space-4);

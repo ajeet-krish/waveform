@@ -1,7 +1,7 @@
 import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
-import GridMark from "./GridMark";
 import Icon from "./Icon";
+import Logo from "./Logo";
 import { isActivePath, SECTIONS } from "../lib/nav";
 
 export default function CommandBar() {
@@ -9,7 +9,7 @@ export default function CommandBar() {
   return (
     <header class="cmd">
       <A href="/" class="cmd-brand" aria-label="Waveform, go to the dashboard">
-        <GridMark height={15} />
+        <Logo height={20} />
         <span class="cmd-wordmark">Waveform</span>
         <span class="cmd-sub">training console</span>
       </A>
