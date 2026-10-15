@@ -1,6 +1,6 @@
 # Waveform Reviews
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 ## 2026-10-14 - Phase 0: Foundation review (full-stack)
 
@@ -274,3 +274,46 @@ no code was modified.
 - Workflow-level `permissions:` blocks are the right default, but any job that executes project code (install or build) should hold the narrowest set; `id-token: write` belongs only on jobs that perform OIDC deployment.
 - Build-time env plumbing (`VITE_BASE_PATH` style) is not a runtime attack surface, but it is an origin-rebasing surface: validate the shape of anything that ends up in Vite `base`, `publicPath`, or manifest URLs so a mistyped value cannot point the bundle at a third-party origin.
 - Nothing in this change set blocks merge. Prior open non-blocking items (untracked heart-fitness.svg at the repo root, stale docs/tests.md counts) remain open from the code review.
+
+## 2026-10-15 - Phase 1a: local data core (code review)
+
+Verdict: PASS
+
+Scope: `packages/scoring/**` (TS scoring port + shared golden fence), `crates/scoring/tests/golden.rs`, `apps/web/src/db/**` (Dexie persistence layer), and supporting config (`apps/web/{package.json,tsconfig.json,vitest.config.ts,vitest.setup.ts}`, `turbo.json`, `pnpm-lock.yaml`, `Cargo.lock`, `crates/scoring/Cargo.toml`). No UI or legacy files touched.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1. Transactional contract | PASS | Every mutating synced-row repo fn wraps row writes plus outbox appends in ONE `db.transaction("rw", ...)`: exercises.ts:65,75; workouts.ts:132,142,167,261,271,294,338,348,375; drafts.ts:72. Deletes are soft tombstones with a delete op carrying the full tombstoned row: exercises.ts:87-94, workouts.ts:180-203,301-315,380-383. drafts.save/discard (drafts.ts:46-49,150-152), profile.save (profile.ts:26-33), and ensureCatalog (ensureCatalog.ts:24-48) write no ops. The atomicity test (repos.test.ts:337-372) is genuine: commit writes session + entry + 2 sets + 4 ops before the invalid third set (reps 0) throws, and all four tables are asserted back to their pre-commit state with the draft intact. |
+| 2. Outbox payload shapes | PASS | `SetEntryWrite` omits e1rm_kg (types.ts:22; toSetWrite workouts.ts:91-93); asserted at repos.test.ts:251,256 and drafts.test.ts:132-142. Op fields are exactly op_id/entity/action/payload/updated_at plus local created_at (types.ts:46-53; key-set assertion outbox.test.ts:39-46). Timestamps are ISO 8601 UTC via `toISOString()` (outbox.ts:24,30-31); row and op share one timestamp (deps.ts:16-20). user_id stamped from deps.userId (workouts.ts:120, drafts.ts:88; asserted repos.test.ts:84, drafts.test.ts:109). |
+| 3. Scoring parity | PASS | Golden JSON is the single source; golden.test.ts and golden.rs (include_str at golden.rs:15) both consume it and both pass. Guards/clamps/caps match the Rust crate exactly (brzycki.ts:15-24 vs brzycki.rs:19-29; climbing.ts:13-16 vs climbing.rs:16-18; effort.ts:72-106 vs effort.rs:74-106). Daily cap inclusive and unrounded, covered by vectors (scoring.golden.json:528-569) and effort.test.ts:158-167. Vectors are meaningful: 45 e1rm rows cover all 36 schema rep counts plus guard rows (reps 0/37/40 fall back to raw weight), 19 vPoints rows cover the full 0..16 scale plus clamp rows (-3, 10000), effort rows cover every bonus cap boundary. Tolerance 1e-6 against 6-decimal expectations (max rounding error 5e-7) is sane. |
+| 4. Catalog parity test | PASS | catalogParity.test.ts:22-34 parses migrations/0002_seed_catalog.sql with a tuple regex; drift fails loudly (length mismatch or first-mismatch diff, :41-63). Exact file order enforced index-by-index (:118-121) and duplicated as a sorted signature check (:123-132). One INSERT with expected columns and the lower(name) conflict clause asserted (:88-94). Seed list faithful: 118 rows in both sources; spot checks (first 18 rows, Ab Wheel, Thruster, last row Foam Rolling) match exactly; the v1 legacy names from legacy/app.js:8-12 occupy seed rows 1-45 in the same order (catalog.ts:18-62). |
+| 5. Validation vs SQL CHECKs | PASS | reps integer 1..36 and weight 0..1500 (validation.ts:45-61 vs 0001_init.sql:157 and 0003_hardening.sql:210-211), duration_min null or 0..1440 (validation.ts:75-88 vs 0003_hardening.sql:224-225), set_index/order_index integer >= 0 (validation.ts:55-57,64-72), local_date YYYY-MM-DD (validation.ts:8,77-79). Boundary tests at repos.test.ts:374-435. Grade bounds have no local CHECK to mirror in 1a (activities arrive in Phase 2); the only grade surface is the scoring clamp 0..16 matching activities_climb_grade_value_range (climbing.ts:6,14 vs 0003_hardening.sql:218-219). |
+| 6. Types | PASS | LocalRow omits applied_at (types.ts:15); repos never write it. strict + noUncheckedIndexedAccess (tsconfig.base.json:11-12) with correct narrow handling (uuidV5.ts:57-58, catalogParity.test.ts:28-30). `import type` used throughout (verbatimModuleSyntax enforces it); no `any`. SetEntryWrite correctly derived from the generated SetEntry (generated.ts:136-148 has e1rm_kg + applied_at). |
+| 7. Schema | PASS | Exactly eight stores at version 1 (schema.ts:31-40); schema.test.ts:31-46 asserts store list, primary keys, and secondary indexes exactly (exercises/owner_id, workout_sessions/local_date, exercise_entries/workout_id, set_entries/exercise_entry_id, outbox/created_at; drafts/profile/sync_meta primary-only). |
+| 8. Conventions | PASS | Rust golden.rs: 4-space indent, K&R braces, snake_case. No em dashes or double hyphens in prose anywhere in the change set (only legitimate `--noEmit` flags in package.json scripts). Tests are substantive (monotonicity, linearity, cap boundaries, clamp edges) and co-located with sources. |
+| 9. Regressions and cleanliness | PASS | git status shows only 7 config/lockfile modifications and the new db/scoring/golden files; nothing under apps/web/src/routes, components, styles, or legacy/. `pnpm install --frozen-lockfile` clean; lockfiles coherent (dexie 4.4.6, fake-indexeddb 6.2.5, scoring workspace link; Cargo.lock adds serde/serde_json dev-deps). `cargo test --workspace` 84/84, clippy `-D warnings` clean, `cargo fmt --check` clean, `cargo test export_ts` passes with zero generated.ts drift. `pnpm test --force` 100/100 (scoring 42, web 58), `pnpm build` and `pnpm lint` clean. |
+
+### Findings (non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low | apps/web/src/db/repos/profile.ts:26-33 | The "profile.save writes NO ops" contract from the sub-phase checklist has no test asserting `outbox.count() === 0` (drafts and ensureCatalog both have one). | Add a small profile repo test alongside drafts.test.ts. |
+| Low | apps/web/src/db/repos/profile.ts:23,31 | `get()` reads `local_profile` keyed by `deps.userId` but `save()` stores the row under `profile.id` verbatim; a mismatched id makes the saved row unreachable through `get()`. | Force `id: deps.userId` in save, or validate `profile.id === deps.userId`. |
+| Low | turbo.json:7 | Turbo warns "no output files found for task @waveform/scoring#build" because its build is `tsc --noEmit` while the shared outputs key is `dist/**`. Cosmetic cache warning. | Add a package-level turbo task override or accept the warning for the typecheck-only package. |
+| Info | apps/web/src/db/types.ts:12-14 | LocalRow doc says "server row minus applied_at", but exercises has no applied_at column at all (0003_hardening.sql:84-118 adds it to nine tables, not exercises), so Omit is a no-op there. Harmless. | Optional doc tweak. |
+| Info | apps/web/src/db/seed/catalogParity.test.ts:24 | The tuple regex assumes names contain no SQL-escaped quotes; such a row would be skipped and trip the length check, so drift still fails loudly rather than silently passing. | None required; noted for future seed edits. |
+
+### Verification Checklist
+- [x] All checks passed
+- [x] No critical issues found
+- [x] Code follows project conventions
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation
+- [x] Phase code integrates cleanly with prior phases (Phase 0 review items unaffected; generated.ts drift check clean)
+
+### Recurring patterns for other agents
+
+- The shared golden fence is the pattern to keep: one JSON vector file, consumed by both the Rust test and the TS test, with a version field and a single declared tolerance. Any future formula change must move both implementations and the vectors together or one side of the fence fails.
+- The repo transactional contract (row writes and outbox appends in one `db.transaction("rw", ..., db.outbox)`, soft deletes with full-tombstone delete payloads, generated columns stripped from wire payloads via a `*Write` type) should be followed exactly by any new entity repo in later sub-phases.
+- SQL-derived constants seeded into TS (catalog names, CHECK bounds) need a parsing parity test like catalogParity.test.ts, and the SQL file must land in turbo.json `globalDependencies` or the test cache will serve stale results.

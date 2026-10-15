@@ -1,0 +1,626 @@
+{
+  "version": 1,
+  "tolerance": 1e-06,
+  "e1rm": [
+    {
+      "weightKg": 100.0,
+      "reps": 1,
+      "expected": 100.0
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 2,
+      "expected": 102.859494
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 3,
+      "expected": 105.887336
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 4,
+      "expected": 109.098844
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 5,
+      "expected": 112.511251
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 6,
+      "expected": 116.144019
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 7,
+      "expected": 120.019203
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 8,
+      "expected": 124.161907
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 9,
+      "expected": 128.600823
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 10,
+      "expected": 133.368898
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 11,
+      "expected": 138.504155
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 12,
+      "expected": 144.050706
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 13,
+      "expected": 150.060024
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 14,
+      "expected": 156.592546
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 15,
+      "expected": 163.719712
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 16,
+      "expected": 171.526587
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 17,
+      "expected": 180.115274
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 18,
+      "expected": 189.609405
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 19,
+      "expected": 200.160128
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 20,
+      "expected": 211.954218
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 21,
+      "expected": 225.225225
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 22,
+      "expected": 240.269101
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 23,
+      "expected": 257.466529
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 24,
+      "expected": 277.315585
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 25,
+      "expected": 300.480769
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 26,
+      "expected": 327.868852
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 27,
+      "expected": 360.750361
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 28,
+      "expected": 400.96231
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 29,
+      "expected": 451.263538
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 30,
+      "expected": 515.995872
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 31,
+      "expected": 602.409639
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 32,
+      "expected": 723.589001
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 33,
+      "expected": 905.797101
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 34,
+      "expected": 1210.653753
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 35,
+      "expected": 1824.817518
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 36,
+      "expected": 3703.703704
+    },
+    {
+      "weightKg": 60.0,
+      "reps": 1,
+      "expected": 60.0
+    },
+    {
+      "weightKg": 60.0,
+      "reps": 10,
+      "expected": 80.021339
+    },
+    {
+      "weightKg": 60.0,
+      "reps": 20,
+      "expected": 127.172531
+    },
+    {
+      "weightKg": 60.0,
+      "reps": 36,
+      "expected": 2222.222222
+    },
+    {
+      "weightKg": 200.0,
+      "reps": 5,
+      "expected": 225.022502
+    },
+    {
+      "weightKg": 200.0,
+      "reps": 20,
+      "expected": 423.908436
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 0,
+      "expected": 100.0
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 37,
+      "expected": 100.0
+    },
+    {
+      "weightKg": 100.0,
+      "reps": 40,
+      "expected": 100.0
+    },
+    {
+      "weightKg": 0.0,
+      "reps": 8,
+      "expected": 0.0
+    },
+    {
+      "weightKg": 0.0,
+      "reps": 36,
+      "expected": 0.0
+    },
+    {
+      "weightKg": -100.0,
+      "reps": 5,
+      "expected": -112.511251
+    },
+    {
+      "weightKg": -100.0,
+      "reps": 1,
+      "expected": -100.0
+    }
+  ],
+  "vPoints": [
+    {
+      "grade": 0,
+      "expected": 1.0
+    },
+    {
+      "grade": 1,
+      "expected": 2.0
+    },
+    {
+      "grade": 2,
+      "expected": 4.0
+    },
+    {
+      "grade": 3,
+      "expected": 8.0
+    },
+    {
+      "grade": 4,
+      "expected": 16.0
+    },
+    {
+      "grade": 5,
+      "expected": 32.0
+    },
+    {
+      "grade": 6,
+      "expected": 64.0
+    },
+    {
+      "grade": 7,
+      "expected": 128.0
+    },
+    {
+      "grade": 8,
+      "expected": 256.0
+    },
+    {
+      "grade": 9,
+      "expected": 512.0
+    },
+    {
+      "grade": 10,
+      "expected": 1024.0
+    },
+    {
+      "grade": 11,
+      "expected": 2048.0
+    },
+    {
+      "grade": 12,
+      "expected": 4096.0
+    },
+    {
+      "grade": 13,
+      "expected": 8192.0
+    },
+    {
+      "grade": 14,
+      "expected": 16384.0
+    },
+    {
+      "grade": 15,
+      "expected": 32768.0
+    },
+    {
+      "grade": 16,
+      "expected": 65536.0
+    },
+    {
+      "grade": -3,
+      "expected": 1.0
+    },
+    {
+      "grade": 10000,
+      "expected": 65536.0
+    }
+  ],
+  "totalVPoints": [
+    {
+      "grades": [
+        0,
+        2,
+        4
+      ],
+      "expected": 21.0
+    },
+    {
+      "grades": [
+        5,
+        5,
+        5
+      ],
+      "expected": 96.0
+    },
+    {
+      "grades": [],
+      "expected": 0.0
+    },
+    {
+      "grades": [
+        4,
+        4,
+        4
+      ],
+      "expected": 48.0
+    },
+    {
+      "grades": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "expected": 8.0
+    }
+  ],
+  "effortPoints": [
+    {
+      "minutes": 60.0,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 60.0
+    },
+    {
+      "minutes": 60.0,
+      "discipline": "climbing",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 66.0
+    },
+    {
+      "minutes": 60.0,
+      "discipline": "cycling",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 54.0
+    },
+    {
+      "minutes": 0.0,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 0.0
+    },
+    {
+      "minutes": -10.0,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 0.0
+    },
+    {
+      "minutes": 90.9,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 90.9
+    },
+    {
+      "minutes": 1.0,
+      "discipline": "climbing",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 1.1
+    },
+    {
+      "minutes": 0.0,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 2,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 4.0
+    },
+    {
+      "minutes": 30.0,
+      "discipline": "climbing",
+      "bonuses": {
+        "prCount": 2,
+        "sends": 5,
+        "elevationM": 250.0
+      },
+      "expected": 44.5
+    },
+    {
+      "minutes": 30.0,
+      "discipline": "climbing",
+      "bonuses": {
+        "prCount": 99,
+        "sends": 99,
+        "elevationM": 10000.0
+      },
+      "expected": 68.0
+    },
+    {
+      "minutes": 0.0,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 1000000,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 10.0
+    },
+    {
+      "minutes": 0.0,
+      "discipline": "climbing",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 1000000,
+        "elevationM": 0.0
+      },
+      "expected": 10.0
+    },
+    {
+      "minutes": 0.0,
+      "discipline": "cycling",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 1000000.0
+      },
+      "expected": 15.0
+    }
+  ],
+  "effortPointsDaily": [
+    {
+      "sessions": [
+        {
+          "minutes": 100.0,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        },
+        {
+          "minutes": 100.0,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 100.0
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 99.5,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 99.5
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 100.0,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 100.0
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 100.5,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 100.0
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 0.0,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 1000,
+            "sends": 1000,
+            "elevationM": 100000.0
+          }
+        },
+        {
+          "minutes": 0.0,
+          "discipline": "climbing",
+          "bonuses": {
+            "prCount": 1000,
+            "sends": 1000,
+            "elevationM": 100000.0
+          }
+        },
+        {
+          "minutes": 0.0,
+          "discipline": "cycling",
+          "bonuses": {
+            "prCount": 1000,
+            "sends": 1000,
+            "elevationM": 100000.0
+          }
+        },
+        {
+          "minutes": 0.0,
+          "discipline": "strength",
+          "bonuses": {
+            "prCount": 1000,
+            "sends": 1000,
+            "elevationM": 100000.0
+          }
+        }
+      ],
+      "expected": 100.0
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 40.0,
+          "discipline": "cycling",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 36.0
+    }
+  ]
+}

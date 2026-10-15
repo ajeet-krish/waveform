@@ -2030,6 +2030,10 @@ dependencies = [
 [[package]]
 name = "waveform-scoring"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "waveform-sync"
