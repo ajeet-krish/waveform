@@ -13,10 +13,14 @@ and counts; the Phase 0 and rebrand entries below are kept for history, and thei
 
 | Suite | Files | Tests | Notes |
 |-------|-------|-------|-------|
-| Web (`apps/web`) | 36 | 315 | vitest over the db core and lib view models |
+| Web (`apps/web`) | 35 | 322 | vitest over the db core and lib view models |
 | Scoring (`packages/scoring`) | 4 | 42 | Brzycki, climbing, effort, and the golden fence |
 | Scoring fence (Rust) | 1 | 6 | `crates/scoring/tests/golden.rs`, part of the Rust workspace total |
 | Rust workspace | - | 84 | unit plus integration across the four crates |
+
+Web counts refreshed 2026-10-15: `importConverters.test.ts` was removed with the deferred v1
+import path (see docs/decisions.md), and the totals also absorb test additions made after this
+section was first written.
 
 The scoring golden fence spans both languages: `packages/scoring/golden/scoring.golden.json` is
 consumed by the TS suite (`golden.test.ts`) and by `crates/scoring/tests/golden.rs`. Flipping one
@@ -28,9 +32,10 @@ vector fails both suites, so the two implementations cannot silently diverge.
   and daily Effort Points identically in TypeScript and Rust; one edited expected value fails both
   suites.
 - **Catalog migration parity**: `catalogParity.test.ts` parses `migrations/0002_seed_catalog.sql`
-  and fails on any content or order drift from `CATALOG_SEED` (the 118 seeded rows minus the seven
-  names `migrations/0004_catalog_cleanup.sql` retires), plus drift between `CATALOG_REMOVED_NAMES`
-  and that cleanup migration's list.
+  and fails on any content or order drift from `CATALOG_SEED` (the 118 seeded rows minus the 27
+  duplicate names `migrations/0005_catalog_dedup.sql` hard-deletes), plus drift between
+  `CATALOG_REMOVED_NAMES` and that dedup migration's delete list, and drift in the older
+  `migrations/0004_catalog_cleanup.sql` soft-delete list.
 - **Outbox atomicity**: `repos.test.ts` commits a draft with one invalid set and asserts every
   table and the outbox roll back together, with the draft untouched. Repo writes and their ops
   share one IndexedDB transaction.
@@ -213,7 +218,7 @@ exactly 9 files, every one an intended historical or out-of-scope reference:
 
 | File(s) | Classification |
 |---------|----------------|
-| `legacy/index.html`, `legacy/manifest.webmanifest`, `legacy/app.js`, `legacy/sw.js` | legacy v1 app, explicitly out of scope |
+| `legacy/index.html`, `legacy/manifest.webmanifest`, `legacy/app.js`, `legacy/sw.js` | legacy v1 app, out of scope at the time; the whole `legacy/` folder was removed on 2026-10-15 together with the deferred v1 import path (see docs/decisions.md) |
 | `docs/decisions.md` | intended history: "v1 (liftlog)", `atma99/liftlog` upstream, fork-rename ADR |
 | `docs/architecture.md:107` | intended: the `POST /import/liftlog` endpoint contract |
 | `docs/reviews.md` | intended: quoted prior findings and the rename review log |

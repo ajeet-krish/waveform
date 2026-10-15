@@ -54,7 +54,6 @@ Local infra:
 - `packages/ui` - SolidJS components: charts, heatmap grid, body map. Planned.
 - `migrations` - SQLx SQL: `0001_init.sql` (schema), `0002_seed_catalog.sql` (seed).
 - `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml` (API service reference).
-- `legacy` - v1 vanilla-JS PWA, kept for the Phase 2 import converter.
 - `docs` - architecture, decision records, research.
 
 ## Status
@@ -63,7 +62,7 @@ Local infra:
 |-------|-------------|--------|
 | Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, GitHub Pages deploy | Complete |
 | Phase 1 Local-first training core | Workouts, exercises, body stats, climbing, cycling, dashboard, settings and backup (no backend) | Complete |
-| Phase 2 Backend + auth + sync | API deploy, auth, sync push/pull, v1 import converter, routines, remaining activities | Not started |
+| Phase 2 Backend + auth + sync | API deploy, auth, sync push/pull, routines, remaining activities | Not started |
 | Phase 3 Social | Leaderboards, heatmap, feed, kudos | Not started |
 | Phase 4 Challenges + hardening | Challenges, hardening, backup and restore drill | Not started |
 

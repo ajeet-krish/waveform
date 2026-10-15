@@ -9,8 +9,8 @@ vanilla-JS PWA is replaced; its domain conventions survive, its code does not.
 
 Phase 1 shipped as a **local-first, single-user client**: the app runs entirely on IndexedDB
 (via Dexie) with no backend in the request path. The Rust API, the Postgres schema, auth, and the
-`sync` crate are in the repo from Phase 0 but are **deferred**: sync push/pull and the v1 import
-converter are Phase 2. See Deployment.
+`sync` crate are in the repo from Phase 0 but are **deferred**: sync push/pull is Phase 2. See
+Deployment.
 
 Locked stack: SolidJS + Vite PWA frontend, Rust (Axum + SQLx) API, Postgres, offline-first sync,
 invite-only auth (OTP + GitHub OAuth), Brzycki e1RM, Fork + PR workflow. The web app deploys to
@@ -37,7 +37,7 @@ GitHub Pages; the API and Postgres are deferred and run locally for development.
 - **Monday-start** weeks. `local_date` (device timezone) groups history, the week strip, and the
   heatmap days.
 - **4-tab mental model** survives, extended by Activities and Social.
-- The **Waveform backup JSON** is the portable format; v1 backup import maps onto it in Phase 2.
+- The **Waveform backup JSON** is the portable format.
 - e1RM is **Brzycki**: `w / (1.0278 - 0.0278 * r)`, labeled "e1RM (Brzycki)". v1's Epley is
   retired; raw kg x reps are preserved so history recomputes losslessly.
 
@@ -68,7 +68,6 @@ waveform/
 ├── migrations/                 # SQLx .sql (0001_init.sql, 0002_seed_catalog.sql, ...)
 ├── infra/                      # docker-compose (Postgres + Mailpit), railway.toml, workflows
 ├── scripts/                    # invite CLI (api subcommand), restore drill
-├── legacy/                     # v1 PWA, kept untouched as the Phase 2 import source
 └── docs/                       # architecture.md, decisions.md, research.md, reviews.md, tests.md
 ```
 
@@ -101,14 +100,18 @@ weight 0..1500 kg; `ACTIVITY_RULES` duration 0..1440, grade 0..16, routes >= 0; 
 weight > 0, bodyfat 0..100), so a bad row fails inside the writing transaction instead of at
 sync-push time. The form layer validates against the same constants.
 
-**Catalog seed** (`seed/`): `CATALOG_SEED` transcribes the 111 live global catalog rows in file
-order from `0002_seed_catalog.sql`, which seeds 118 rows; the seven duplicates that
-`0004_catalog_cleanup.sql` soft-deletes are named in `CATALOG_REMOVED_NAMES` and absent here.
+**Catalog seed** (`seed/`): `CATALOG_SEED` transcribes the 91 live global catalog rows in file
+order from `0002_seed_catalog.sql`, which seeds 118 rows across two naming sets; the 27 duplicates
+that `0005_catalog_dedup.sql` hard-deletes are named in `CATALOG_REMOVED_NAMES` and absent here
+(0004 had soft-deleted seven of them, and 0005 restores the first-set "Ab Wheel").
 `ensureCatalog` bulk-inserts the seed idempotently when a device has none, then reconciles the
-retired names on every bootstrap (neither step writes ops); `catalogSeedId` derives a
-deterministic RFC 4122 UUIDv5 over `lower(name)`, mirroring the SQL `lower(name)` unique key.
-`catalogParity.test.ts` parses both migrations and fails on any content or order drift, including
-drift between `CATALOG_REMOVED_NAMES` and the 0004 cleanup list.
+global catalog to `CATALOG_SEED` on every bootstrap: non-seed global rows are hard-deleted,
+missing seed rows are inserted, tombstoned seed rows are restored (neither step writes ops);
+`catalogSeedId` derives a deterministic RFC 4122 UUIDv5 over `lower(name)`, mirroring the SQL
+`lower(name)` unique key. History resolves exercise names from the live list and falls back to
+"Unknown exercise" for a row that no longer exists. `catalogParity.test.ts` parses both
+migrations and fails on any content or order drift, including drift between
+`CATALOG_REMOVED_NAMES` and the 0005 delete list.
 
 **Reactive bridge** (`query.ts`): `createLocalQuery(querier)` materializes a Dexie `liveQuery`
 into Solid signals (`latest`, `error`, `loading`) and unsubscribes on cleanup; `observeQuery` is
@@ -157,8 +160,7 @@ the deferred Social placeholders (Leaderboard, Heatmap, Feed).
 - Forms and UI: `forms.ts` (signal-based form state), `formInputs.ts`, `errors.ts` (issue copy),
   `nav.ts` (tabs and sections), `catalog.ts` (muscle groups plus custom-exercise rules),
   `sparkline.ts`.
-- Backup and storage: `backup.ts`, `backupImport.ts`, `importSummary.ts`, `importConverters.ts`,
-  `storage.ts`.
+- Backup and storage: `backup.ts`, `backupImport.ts`, `importSummary.ts`, `storage.ts`.
 
 **Components** (`components/`): Shell, CommandBar, TabBar, WeekStrip, PageHeader, Panel,
 EmptyState, ConfirmDialog, StorageAlert, StorageBlocked, Sparkline, Icon, Logo, plus
@@ -179,9 +181,8 @@ incoming `updated_at` is strictly newer (LWW on parsed instants) and leaves exis
 alone; **replace** requires a typed confirmation, wipes the data stores, outbox, and `sync_meta`
 (drafts survive), then restores every row. Each written row queues one op whose `updated_at` is
 the row's own LWW time and whose `created_at` is import time, so the outbox drains in import
-order. `e1rm_kg` is recomputed on import. `importConverters.ts` is the seam for the Phase 2 v1
-converter (deterministic UUIDv5 over `liftlog:<id>`); an unregistered source returns an honest
-"arrives in Phase 2" issue.
+order. `e1rm_kg` is recomputed on import. JSON that does not carry the Waveform backup format
+is rejected with an honest "does not look like a Waveform backup file" issue.
 
 ## Storage Resilience
 
@@ -213,8 +214,8 @@ DDL lives in `migrations/0001_init.sql`.
 - Phase 0: monorepo, schema + migrations, CI/CD, deploy skeleton, auth shell.
 - Phase 1: local-first training core (workouts, exercises, history, body stats, climbing,
   cycling, dashboard, settings and backup). Shipped client-side on IndexedDB; no backend.
-- Phase 2: backend + auth + sync push/pull, the v1 import converter, routines, and the remaining
-  activity types (running/hike/swim).
+- Phase 2: backend + auth + sync push/pull, routines, and the remaining activity types
+  (running/hike/swim).
 - Phase 3: social (boards, heatmap, feed, kudos).
 - Phase 4: challenges, hardening, backup/restore drill.
 

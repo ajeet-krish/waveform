@@ -316,3 +316,20 @@ turns an opaque DOMException into an actionable backup prompt.
 
 **Trade-offs**: Persistence is a request, not a guarantee, and `persist()` may be refused.
 Accepted: the alert plus backup export is the honest fallback.
+
+## 2026-10-15 - Phase 1: Drop the v1 import path entirely [LOCKED]
+
+**Context**: The `legacy/` folder (the original single-file v1 PWA) and the `importConverters.ts`
+converter registry were kept as a deferred seam for migrating v1 users onto the Waveform backup
+format. The product owner never used the old app, so there is no v1 data to migrate.
+
+**Decision**: Remove the seam entirely: `legacy/` and `apps/web/src/lib/importConverters.ts` (plus
+its test) are deleted, and `parseImportFile` no longer sniffs foreign exports. A JSON file that
+does not carry the Waveform backup format is rejected with an honest "does not look like a
+Waveform backup file" issue.
+
+**Rationale**: A seam with no users is dead weight: it is code, docs, and test surface for a
+migration that will never run. Deleting it now keeps the importer honest about what it accepts.
+
+**Trade-offs**: A real v1 export in the wild can no longer be imported. Accepted: there is no v1
+data to import, and the Waveform backup format is the only import path.

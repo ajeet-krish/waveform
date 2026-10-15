@@ -19,7 +19,9 @@
  * op each. Op updated_at always equals the row's own updated_at (LWW
  * truth), while op created_at is import time so the outbox drains in
  * import order. After any apply, ensureCatalog self-heals a backup that
- * carries no catalog rows.
+ * carries no catalog rows and reconciles stale global catalog rows back
+ * to the current seed (a hard delete writes no ops, so the queue is
+ * untouched).
  */
 
 import { e1rmBrzycki } from "@waveform/scoring";
@@ -54,11 +56,6 @@ import {
 } from "../db/validation";
 import { toSetWrite } from "../db/repos/workouts";
 import type { WaveformBackupV2 } from "./backup";
-import {
-  getLegacyConverter,
-  importSourceLabel,
-  sniffImportSource,
-} from "./importConverters";
 import { reportStorageFailure } from "./storage";
 
 /** How an imported backup meets the local log. */
@@ -220,9 +217,7 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
     issues.push(`Unexpected format ${JSON.stringify(raw.format)}; expected "waveform-backup".`);
   }
   if (raw.version === 1) {
-    issues.push(
-      "This is a Waveform v1 backup. Version 1 restores through the legacy v1 import wizard, not this importer.",
-    );
+    issues.push("This backup was made by an older Waveform version.");
   } else if (typeof raw.version === "number" && raw.version >= 3) {
     issues.push("This backup was made by a newer Waveform. Update this app before importing.");
   } else if (raw.version !== 2) {
@@ -412,11 +407,9 @@ export function parseBackup(text: string): ImportParseResult {
 }
 
 /**
- * Dispatches an imported file: a Waveform backup goes to parseBackup,
- * anything else is sniffed for a known legacy source. A sniffed source
- * with a registered converter runs it; a sniffed source without one
- * returns the honest "arrives in Phase 2" issue. Unrecognized files say
- * so.
+ * Dispatches an imported file: JSON that carries the Waveform backup
+ * format goes to the full version and row validation; anything else is
+ * not a Waveform backup and says so.
  */
 export function parseImportFile(text: string): ImportParseResult {
   let raw: unknown;
@@ -428,31 +421,9 @@ export function parseImportFile(text: string): ImportParseResult {
   if (isRecord(raw) && raw.format === "waveform-backup") {
     return parseBackupRaw(raw);
   }
-  const source = sniffImportSource(raw);
-  if (source !== null) {
-    const converter = getLegacyConverter(source);
-    if (converter) {
-      try {
-        return converter(raw);
-      } catch (cause) {
-        return {
-          ok: false,
-          issues: [`${importSourceLabel(source)} import failed: ${messageOf(cause)}`],
-        };
-      }
-    }
-    return {
-      ok: false,
-      issues: [
-        `This looks like a ${importSourceLabel(source)} export. ${importSourceLabel(source)} imports arrive in Phase 2.`,
-      ],
-    };
-  }
   return {
     ok: false,
-    issues: [
-      'Unrecognized file: expected a Waveform backup (format "waveform-backup") or a known legacy export.',
-    ],
+    issues: ["This does not look like a Waveform backup file."],
   };
 }
 

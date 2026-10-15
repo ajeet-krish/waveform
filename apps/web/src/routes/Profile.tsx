@@ -418,8 +418,7 @@ function BackupPanel(): JSX.Element {
     <Panel label="Backup">
       <p class="panel-note">
         One JSON file with your profile, the exercise catalog, and every session, entry, and set
-        this device holds, deletions included. The v1 app's backup file gets its own import in
-        Phase 2.
+        this device holds, deletions included.
       </p>
       <div class="form-actions mt-4">
         <button

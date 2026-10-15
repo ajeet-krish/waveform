@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createWaveformDb, type WaveformDb } from "../db/schema";
 import type { LocalProfile, LocalRow, WorkoutDraft } from "../db/types";
 import { LocalValidationError } from "../db/validation";
+import { catalogSeedId } from "../db/seed/uuidV5";
 import type { WorkoutSession } from "@waveform/api-types";
 import { collectBackup, serializeBackup, type WaveformBackupV2 } from "./backup";
 import { applyBackupImport, parseBackup, parseImportFile } from "./backupImport";
@@ -10,6 +11,13 @@ import { subscribeStorageFailures, isQuotaExceeded, type StorageFailure } from "
 
 const STAMP = "2026-10-14T00:00:00.000Z";
 const IMPORT_TIME = "2026-10-15T09:00:00.000Z";
+
+/**
+ * The fixture's global exercise row uses the real seed id: ensureCatalog
+ * reconciles global rows to CATALOG_SEED after every import and
+ * hard-deletes any global row whose id no seed claims.
+ */
+const BENCH_SEED_ID = await catalogSeedId("Bench Press (Barbell)");
 
 /** Deterministic import clock so op created_at is assertable. */
 function importNow(): () => Date {
@@ -72,7 +80,7 @@ function sampleBackup(): WaveformBackupV2 {
     profile: sampleProfile("Ada"),
     exercises: [
       {
-        id: "ex-bench",
+        id: BENCH_SEED_ID,
         owner_id: null,
         name: "Bench Press (Barbell)",
         muscle_group: "chest",
@@ -97,7 +105,7 @@ function sampleBackup(): WaveformBackupV2 {
       {
         id: "entry-1",
         workout_id: "sess-1",
-        exercise_id: "ex-bench",
+        exercise_id: BENCH_SEED_ID,
         order_index: 0,
         notes: null,
         created_at: STAMP,
@@ -253,7 +261,7 @@ describe("parseBackup", () => {
     }
   });
 
-  it("points a version 1 backup at the legacy seam", () => {
+  it("flags a version 1 backup as an older Waveform version", () => {
     const result = parseBackup(
       tamperedText((root) => {
         root.version = 1;
@@ -261,7 +269,7 @@ describe("parseBackup", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some((issue) => issue.includes("legacy v1 import wizard"))).toBe(true);
+      expect(result.issues.some((issue) => issue.includes("older Waveform version"))).toBe(true);
     }
   });
 
@@ -957,7 +965,25 @@ describe("parseImportFile dispatch", () => {
     const result = parseImportFile(JSON.stringify({ some: "random", file: true }));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues[0]).toContain("Unrecognized file");
+      expect(result.issues).toEqual(["This does not look like a Waveform backup file."]);
+    }
+  });
+
+  it("reports a non-backup JSON blob as not a Waveform backup", () => {
+    // The removed v1 import path used to sniff this shape; there is
+    // nothing to import from the old app now, so it is just not a backup.
+    const result = parseImportFile(JSON.stringify({ v: 1, exercises: [], workouts: [] }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toEqual(["This does not look like a Waveform backup file."]);
+    }
+  });
+
+  it("reports a JSON array as not a Waveform backup", () => {
+    const result = parseImportFile("[1, 2, 3]");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toEqual(["This does not look like a Waveform backup file."]);
     }
   });
 });

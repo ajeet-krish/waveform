@@ -3,8 +3,7 @@
  *
  * The catalog migration generates ids server-side with gen_random_uuid();
  * locally we derive a stable id per exercise name so re-seeding a wiped
- * device lands on the same ids and the import wizard can map legacy rows
- * onto catalog entries deterministically.
+ * device lands on the same ids deterministically.
  */
 
 /**

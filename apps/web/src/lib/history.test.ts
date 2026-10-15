@@ -96,6 +96,18 @@ describe("summarizeSession", () => {
     expect(summary).not.toHaveProperty("topE1rmKg");
     expect(summary.volumeKg).toBe(0);
   });
+
+  it("renders 'Unknown exercise' for a catalog row hard-deleted after logging", () => {
+    // The name map is built from the live list, so a 0005 dedup delete
+    // leaves a gap; the summary must still render the session.
+    const tree = makeTree("s3", "2026-10-14", [
+      { exerciseId: "ex-retired-duplicate", sets: [{ weight_kg: 60, reps: 5 }] },
+    ]);
+    expect(NAMES.has("ex-retired-duplicate")).toBe(false);
+    const summary = summarizeSession(tree, NAMES);
+    expect(summary.exerciseNames).toEqual(["Unknown exercise"]);
+    expect(summary.exerciseCount).toBe(1);
+  });
 });
 
 describe("groupSessionsByWeek", () => {

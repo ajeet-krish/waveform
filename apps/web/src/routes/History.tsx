@@ -103,7 +103,6 @@ function WorkoutsView(props: { repos: Repos; unit: WeightUnit }): JSX.Element {
               title="Your log is empty"
               body="Finished sessions land here with sets, weights in kg, reps, and e1RM (Brzycki), grouped by the day they happened."
               actions={[{ label: "Log your first session", href: "/workout" }]}
-              note="Coming from the v1 app? The import wizard reads your JSON backup"
             />
           }
         >

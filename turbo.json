@@ -2,7 +2,8 @@
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": [
     "migrations/0002_seed_catalog.sql",
-    "migrations/0004_catalog_cleanup.sql"
+    "migrations/0004_catalog_cleanup.sql",
+    "migrations/0005_catalog_dedup.sql"
   ],
   "tasks": {
     "build": {
