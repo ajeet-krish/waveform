@@ -1,4 +1,4 @@
-# LiftLog Reviews
+# Waveform Reviews
 
 Last updated: 2026-10-14
 
@@ -36,7 +36,7 @@ against docs/architecture.md and docs/decisions.md. No code was modified.
 | Low | apps/web/src/routes/Login.tsx:37-74 | One form with two submit buttons; when Phase 1 wires handlers, Enter-key submits resolve to the first button and `SubmitEvent.submitter` must disambiguate. | Split into two forms or branch on `event.submitter`. |
 | Low | apps/web/src/routes/Profile.tsx:35 | "Sessions survive reinstalls on the home screen app" is unverified; iOS typically wipes home-screen app storage on removal (cookies may survive; IndexedDB mirror will not). | Verify the claim before shipping or soften the copy. |
 | Low | infra/docker-compose.yml:21 | `axllent/mailpit:latest` is unpinned; a floating tag can break dev environments. | Pin a version tag. |
-| Low | crates/sync/Cargo.toml:9 | `serde` is an unused dependency in liftlog-sync (and lint-level "unused" will not catch it). | Drop it or use it when op payloads get typed. |
+| Low | crates/sync/Cargo.toml:9 | `serde` is an unused dependency in waveform-sync (and lint-level "unused" will not catch it). | Drop it or use it when op payloads get typed. |
 | Low | packages/api-types/package.json:12 | The "test" script is `tsc --noEmit`, identical to lint; it asserts nothing new. | Acceptable placeholder; replace with real tests or drop the script when the pipeline needs it. |
 | Low | migrations/0001_init.sql:253-263 | `client_ops` grows forever; replay dedupe history has no retention policy. | Prune processed ops older than the maximum offline window (for example 30 days) in a scheduled job. |
 | Low | apps/web/src/components/TabBar.tsx:11 | Active nav links use only a class; screen readers get no current-page indication. | Add `aria-current="page"` on the active link. |
@@ -87,7 +87,7 @@ stubs, so findings target the DESIGN and the foundation. No code was modified.
 | Medium | crates/sync/src/lib.rs:7-9; migrations/0001_init.sql:253-263 | Sync idempotency as specced is exploitable in two ways: a replayed foreign op_id is a silent no-op success, so anyone who learns a victim op_id can pre-claim it and suppress the victim op (first writer wins); and nothing states that apply must force row user_id from the session, so a payload-supplied user_id could write rows into another account (workout poisoning, body_stats injection). Also the row upsert and client_ops insert must commit atomically. | Return 409 when an op_id exists for a different user_id, overwrite or reject any user_id in payloads (session user wins), apply each op and its client_ops row in one transaction, and cap ops per push batch. |
 | Medium | docs/architecture.md:105; legacy/ | POST /import/liftlog accepts arbitrary JSON with no specified defenses: no body size cap, no schema or range validation, and "idempotent per legacy id" is a global key, so one account's import can suppress another's if the same legacy backup is imported twice. | Set an explicit axum body limit for the import route (streaming cap above the JSON CRUD default), strict DTOs with range checks (weights, reps, dates), per-user namespacing of legacy ids (user_id, legacy_id), per-user rate limits, and one transactional all-or-nothing import. |
 | Medium | .github/workflows/ci.yml:1-97 | No supply-chain vulnerability gates: cargo audit / cargo deny and pnpm audit are not run anywhere. The planned backup workflow (docs/architecture.md:59) will hold live database credentials and does not exist yet, so its secrets handling is undecided. | Add a rustsec audit job (cargo deny check advisories or rustsec/audit-check) and a pnpm audit step (warn-only at first), add workflow-level permissions: contents: read, and define secrets handling for the backup workflow (GitHub Environments secrets, no echo, masked logs). |
-| Medium | apps/api/src/config.rs:31-34; infra/railway.toml:7-13 | RUN_MIGRATIONS defaults to true, so every production boot runs DDL with the API's database role. A future SQLi or RCE then escalates to schema control, and the app role must hold migration rights it should not need. | Default to false in production, run migrations as an explicit release step (cargo run -p liftlog-api migrate) under a separate role, and give the serving role DML-only grants. |
+| Medium | apps/api/src/config.rs:31-34; infra/railway.toml:7-13 | RUN_MIGRATIONS defaults to true, so every production boot runs DDL with the API's database role. A future SQLi or RCE then escalates to schema control, and the app role must hold migration rights it should not need. | Default to false in production, run migrations as an explicit release step (cargo run -p waveform-api migrate) under a separate role, and give the serving role DML-only grants. |
 | Low | crates/db/src/models.rs:17-29 | User derives Serialize and TS with email and github_id. Social surfaces (feed, leaderboard) must not echo other users' email addresses. | Introduce a PublicUser DTO (id, display_name, avatar_url) for anything rendered to other users; keep the full row owner-only. |
 | Low | .github/workflows/ci.yml:17-21,52-55; infra/docker-compose.yml:21 | GitHub Actions are tag-pinned (mutable) and axllent/mailpit:latest floats; a compromised tag or upstream image can execute in CI. | Pin actions to commit SHAs and pin Mailpit to a version tag. Dev-only impact, but CI runs on every PR. |
 | Low | crates/db/src/lib.rs:29-35; apps/api/src/config.rs:25 | connect() never requires TLS; a DATABASE_URL without sslmode=require silently sends traffic plaintext if Postgres is reached off the Railway internal network. | Validate or document sslmode=require for every non-internal connection string. |
@@ -122,3 +122,155 @@ stubs, so findings target the DESIGN and the foundation. No code was modified.
 - The auth design decisions (domain layout, cookie flags, invite code hashing) must be locked in an ADR before any Phase 1 auth handler is written; every finding in rows 1 to 3 is cheaper to fix now than after handlers exist.
 - Serialization of database rows straight into responses is the standing leak risk: hash fields and PII need skip attributes or DTOs before the first handler lands (rows 2 and 8).
 - Any client-supplied identifier (op_id, legacy import id, user_id in payloads) needs an ownership rule before it is trusted (rows 4 and 5).
+
+## 2026-10-14 - Phase 0: Waveform rebrand + GitHub Pages deploy (code review)
+
+Verdict: FAIL (one Medium; a one-line revert flips this to PASS)
+
+Scope: uncommitted change set on branch `rebrand/waveform` (46 modified files, 2 untracked):
+full LiftLog to Waveform rename across Rust crates, npm packages, infra, CI, and docs; new
+env-driven Vite `base` with relative PWA manifest values; router base wiring; `.github/workflows/pages.yml`
+GitHub Pages deployment with `404.html` SPA fallback; two new ADRs. `legacy/` confirmed untouched.
+Verification basis: static review of every changed file plus full command runs
+(`cargo build/clippy/fmt/test`, `cargo test export_ts` drift check, `pnpm install/build/lint/test`,
+and a dedicated `VITE_BASE_PATH=/waveform/` production build inspected at the URL level). 9 of 9
+commands exit 0; see docs/tests.md for the standing test record.
+
+### Findings
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | migrations/0001_init.sql:1 | The rebrand edits an applied migration (comment `/* LiftLog initial schema.` to `/* Waveform initial schema.`). sqlx checksums migration files, so any database that applied the pre-rebrand file hard-fails `run_migrations` and `sqlx migrate verify` with "previously applied but has been modified". This also violates AGENTS.md:38 ("migrations are append-only... never edit an applied one"). Practical exposure is limited today (compose volume rename forces fresh dev DBs, CI is ephemeral, no managed DB yet) but the trap is live for branch switches, non-compose Postgres, and future restores of old dumps. | Revert line 1 to its pre-rebrand text (historical attribution is defensible in a migration header). Branding is not worth checksum churn. If the edit is kept instead, document the mandatory DB reset in the rename ADR. |
+| Low | heart-fitness.svg:1 | Untracked SVG Repo source asset (heart with ECG polyline) at the repo root, referenced nowhere in the tree; likely raw material for the favicon. | Delete before merge, or move to a design assets location and reference it (for example as an input to apps/web/scripts/generate-icons.mjs). |
+| Low | AGENTS.md:74 | "docs/reviews.md and docs/tests.md will appear in later phases" is stale; both docs exist and are actively maintained. | Point Deep Docs at them as live documents. |
+| Low | docs/tests.md:22-50 | Suite counts are stale versus the current tree: the doc claims 66 Rust and 15 JS tests (scoring 16, sync unit 4, outbox_contract 9, week 5, nav 4); the current suite runs 78 Rust and 19 JS (scoring 17, sync unit 8, outbox_contract 13, week 7, nav 7). Not introduced by this change set (its diff here is rename-only) but this file is the test record. | Refresh counts at the next test pass or append a dated addendum. |
+| Low | .github/workflows/pages.yml:13-15 | `concurrency: group: pages` uses `cancel-in-progress: true`, which can abort an in-flight Pages deployment when a new push lands; GitHub's own Pages template uses `false` for deploy groups. | Set `cancel-in-progress: false`. |
+| Low | README.md:38 | The layout comment "`.github/workflows/` CI: rust, ts-rs drift, JS workspace, migrations" omits the new Pages workflow. | Mention `pages` in the comment. |
+
+### Check Results
+
+| Check | Verdict | Notes |
+|-------|---------|-------|
+| Rebrand completeness (code, config, infra, CI) | PASS | Case-insensitive sweep finds `liftlog`-family tokens only in `legacy/` (out of scope) and sanctioned doc history: docs/decisions.md:66,122-128,159-166 (ADR context and superseded fork ADR), docs/architecture.md:107 (`POST /import/liftlog`), docs/reviews.md:88 (quoted prior finding). Nothing in apps/, crates/, migrations/, infra/, workflows, or lockfiles; the built bundle contains zero old-branding matches. |
+| legacy/ untouched | PASS | No legacy/ file appears in `git status`; historical references deliberately preserved as required. |
+| Rust crate rename consistency | PASS | Workspace members and path deps are `waveform-*` (Cargo.toml:11-14), binary `waveform-api` (apps/api/Cargo.toml:2,9), `use waveform_db::` paths and the EnvFilter target `waveform_api=info` (apps/api/src/main.rs:23,28,36,58) all agree; Cargo.lock regenerated cleanly. Non-rename delta in crates/ is rustfmt reflow of nine `run_migrations(...)` call sites only. |
+| Rust conventions (fmt, clippy, style) | PASS | `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; 4-space K&R, snake_case/PascalCase/SCREAMING_SNAKE hold in all touched files. |
+| JS/TS package rename | PASS | `waveform`, `@waveform/web`, `@waveform/api-types` (package.json:2, apps/web/package.json:2,16, packages/api-types/package.json:2); import renamed at apps/web/src/types/api.ts:17; pnpm-lock.yaml coherent, frozen-lockfile install succeeds. |
+| TS conventions (strict, no `any`) | PASS | No `any` anywhere in apps/ or packages/ (matches are prose and manifest strings); tsconfig gains `"node"` types (apps/web/tsconfig.json:4) paired with `@types/node` (apps/web/package.json:21), needed by `process.env` in vite.config.ts:8. |
+| Prose conventions (no em dashes or double hyphens) | PASS | All markdown clean; remaining `--` are command flags and table separators; en/em dash matches occur only in legacy/ (out of scope). |
+| Migration immutability (append-only discipline) | FAIL | migrations/0001_init.sql:1 comment edit changes the sqlx checksum of an applied migration. See Medium finding. Everything else about migrations is intact: 0002/0003 unchanged, 17-table CI assertion and seed floor still hold. |
+| Vite base and PWA scope | PASS | Env-driven base (vite.config.ts:8) verified with a real `VITE_BASE_PATH=/waveform/` build: dist/index.html rebases every local URL under `/waveform/` (including the root-absolute icon links at source index.html:11-12), manifest `id`/`start_url`/`scope` stay relative (vite.config.ts:21-23) and resolve under `/waveform/`, and the worker registers at `/waveform/sw.js` with scope `/waveform/` while sw.js keeps relative precache URLs, so `createHandlerBoundToURL("index.html")` resolves to `/waveform/index.html`. |
+| Router base handling | PASS | apps/web/src/App.tsx:22,26 strips BASE_URL trailing slashes; routerBase "" is the documented no-base behavior and is confirmed safe by @solidjs/router's `options.base \|\| ""` (node_modules routing.js:368), while "/waveform" avoids double-slash joins. |
+| 404 SPA fallback | PASS | pages.yml:34-35 copies dist/index.html to dist/404.html; reproduced exactly, output is byte-identical with all asset URLs under `/waveform/`, so deep links to /waveform/<route> load the app and the router resolves them. |
+| Pages workflow logic | PASS (note) | Ordering (checkout, pnpm setup before node setup with `cache: pnpm`, frozen-lockfile install, build with VITE_BASE_PATH, 404 copy, configure-pages, upload-pages-artifact, deploy job with github-pages environment and `page_url`) is sound; artifact path apps/web/dist matches the Vite outDir; permissions (contents: read, pages: write, id-token: write) are the correct minimal set; `pnpm/action-setup@v4` resolves pnpm@10.14.0 from packageManager (package.json:6). Note: concurrency `cancel-in-progress: true` (Low finding). |
+| CI workflow correctness | PASS | ci.yml: minimal `contents: read`; ts-rs drift removes generated.ts first and fails on tracked or untracked drift (ci.yml:53-64); frozen lockfile (ci.yml:77); migrations job service creds, health check, and DATABASE_URL all consistent with the waveform rename (ci.yml:93-105) and it runs `cargo test -p waveform-db` against real Postgres, covering the schema suites that skip locally without WAVEFORM_TEST_DATABASE_URL. |
+| Generated types drift | PASS | `cargo test export_ts` regenerates byte-identical output; packages/api-types/src/generated.ts stays clean and is not in the change set. |
+| Doc accuracy versus reality | FAIL | The rename itself is accurate everywhere checked (README quick start vs .env.example RUN_MIGRATIONS nuance, architecture Deployment section, ADRs, railway.toml comment all match reality; the two new ADRs at docs/decisions.md:157-191 correctly record the rename and hosting pivot, and the fork ADR is properly marked superseded at line 122). Stale bits: AGENTS.md:74 and docs/tests.md counts (Low findings). |
+| Change hygiene (stray files) | FAIL | Untracked heart-fitness.svg at the repo root (Low finding); pages.yml is the only intended new file. |
+| Build and test verification | PASS | 9/9 exit 0: cargo build, clippy `-D warnings`, fmt --check, test (78/78), export_ts drift check, pnpm install/build/lint/test (19/19 JS). Caveats: db schema tests skip without WAVEFORM_TEST_DATABASE_URL (covered in the CI migrations job); local pnpm lint/test replayed turbo cache from a clean run of the current tree. |
+
+### Verification Checklist
+
+- [x] All checks passed (3 FAIL items: migration immutability, doc accuracy, change hygiene)
+- [x] No critical issues found (no Critical or High; one Medium)
+- [ ] Code follows project conventions (one violation: migrations/0001_init.sql edited despite the append-only rule)
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation
+- [x] Phase code integrates cleanly with prior phases (the only integration hazard is the migration checksum noted above)
+
+### Recurring patterns for other agents
+
+- Never edit an applied migration file, even a comment: sqlx checksums file contents and the edit breaks `migrate verify` and `run_migrations` on every database that applied the old bytes. Rebranding stops at the migration boundary.
+- Deployment-sensitive config must be exercised in its deployment shape: the default-base build passing does not prove the `/waveform/` build works. Build once with `VITE_BASE_PATH=/waveform/` and inspect dist/index.html, manifest.webmanifest, and the sw registration URLs before merging Pages changes.
+- Rename sweeps should end with a leftover-identifier grep (case-insensitive, whole tree) and a stray-file check (`git status` untracked entries); both caught items in this review that the diff itself did not flag.
+
+## 2026-10-14 - Phase 0: Waveform rebrand + GitHub Pages deploy (re-review)
+
+Verdict: PASS
+
+Scope: fix verification for the 2026-10-14 rebrand review above. The four applied fixes were
+checked one by one and the full command suite was re-run to confirm the change set has no
+regressions after the edits.
+
+### Fix verification
+
+| Fix | Verdict | Details |
+|-----|---------|---------|
+| Medium: migrations/0001_init.sql:1 reverted to `/* LiftLog initial schema.` | PASS | `git diff -- migrations/0001_init.sql` is empty and `git status --porcelain -- migrations/` is empty; the applied migration is byte-identical to HEAD and no other migration file was edited. |
+| Low: pages.yml concurrency | PASS | .github/workflows/pages.yml:13-15 is now `group: pages` with `cancel-in-progress: false`, matching GitHub's own Pages template. |
+| Low: README.md repository layout | PASS | README.md:38 now reads "CI: rust, ts-rs drift, JS workspace, migrations; Pages deploy", covering the new workflow. |
+| Low: AGENTS.md Deep Docs | PASS | AGENTS.md:74-75 link Reviews and Tests as live docs; the "will appear in later phases" wording is gone; the file is 75 lines (under the 80-line budget). |
+
+### Regression verification
+
+9 of 9 commands exit 0: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace` (78 passed, 0 failed), `cargo test export_ts` (generated.ts byte-identical,
+no drift), `npx pnpm@10 install --frozen-lockfile`, `build`, `lint`, `test` (19 passed, 0 failed).
+`git status` shows 45 modified and 2 untracked files; `migrations/` is absent from the change set
+(46 became 45, exactly the reverted file), so the Medium fix introduced no collateral edits.
+
+### Findings (carried over, non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low | heart-fitness.svg:1 | Still open from the prior review: untracked SVG asset at the repo root, referenced nowhere in the tree. Not a merge blocker but it is change hygiene. | Delete before merge, or move to a design assets location and reference it (for example as an input to apps/web/scripts/generate-icons.mjs). |
+| Low | docs/tests.md:22-50 | Still open from the prior review: suite counts read 66 Rust and 15 JS versus the current 78 and 19 (scoring 17, sync unit 8, outbox_contract 13, week 7, nav 7). | Refresh counts at the next test pass or append a dated addendum. |
+
+### Verification Checklist
+
+- [x] All blocking checks passed (the Medium is resolved; two prior Low findings remain open and non-blocking)
+- [x] No critical issues found
+- [x] Code follows project conventions (migration immutability restored; the append-only rule at AGENTS.md:38 now holds)
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation
+- [x] Phase code integrates cleanly with prior phases (the migration checksum trap is gone; 9 of 9 commands green)
+
+## 2026-10-14 - Phase 0: Waveform rebrand + GitHub Pages deploy (security review)
+
+Verdict: PASS
+
+Scope: uncommitted change set on branch `rebrand/waveform`. Security review of the LiftLog to
+Waveform rename across Rust crates, npm packages, Postgres db/user/volume, env vars, CI, and docs,
+plus the new `.github/workflows/pages.yml` GitHub Pages deploy and the two app-code deltas
+(router `base` at apps/web/src/App.tsx:22-26 and env-driven Vite `base` with relative PWA manifest
+values at apps/web/vite.config.ts:7-33). Focus: secret leakage in committed files, Actions
+permission scope and triggers, injection and path traversal via the base handling, Pages artifact
+exposure, the `@types/node` dependency addition, and action supply-chain pinning. Static review;
+no code was modified.
+
+### Findings
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low | .github/workflows/pages.yml:8-11,22-35 | Workflow-level permissions grant `pages: write` and `id-token: write` to the build job, which executes project code (pnpm install lifecycle scripts, vite build). Only the deploy job needs `id-token: write`; a compromised dependency install script would otherwise run with a token that can mint OIDC tokens and alter Pages settings. This is the shape of GitHub's own static-deploy template, so it is consistent, but per-job scoping is stricter. | Scope permissions per job: build gets `contents: read` (plus `pages: write` only while `enablement` stays), deploy gets `pages: write` and `id-token: write`. |
+| Low | .github/workflows/pages.yml:36-38 | `actions/configure-pages@v5` with `enablement: true` lets CI silently mutate repository settings (enabling Pages) on first run. | Enable Pages once in repo settings and drop `enablement: true` so CI never changes repo configuration implicitly. |
+| Low | apps/web/vite.config.ts:8 | `VITE_BASE_PATH` flows into Vite `base` unvalidated. Not user-controlled today (set only by CI at pages.yml:33 or the developer shell), but a `//host/` or `https://host/` value would rebase every asset, manifest, and service-worker URL to a third-party origin at build time. | Assert the value matches `^\/[A-Za-z0-9._-]*\/$` (or is `/`) before returning the config; reject anything else at build time. |
+| Low | .github/workflows/pages.yml:22-39 (carried) | Actions are major-tag pinned, not SHA pinned; a moved tag can execute arbitrary code in CI. Carried unchanged from the 2026-10-14 Phase 0 security review (row 9); pages.yml is consistent with ci.yml, so the posture did not regress. | Pin all actions to commit SHAs in a dedicated hardening pass across both workflows. |
+| Info | .github/workflows/pages.yml:33 | Hardcoded `VITE_BASE_PATH: /waveform/` assumes the repo keeps its name; a future rename silently breaks the deployed site. Availability, not security. | Optionally derive from `${{ github.event.repository.name }}`. |
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| Secret leakage in committed files | PASS | Whole-tree sweep for key, token, secret, password, private-key, and common API-key patterns finds no real credentials. `.env.example` holds development defaults only: local compose credentials (`waveform:waveform` at .env.example:5, matching infra/docker-compose.yml:7-9), bind address and port, a documented dev-only `RUN_MIGRATIONS=true` opt-in (:15) beside the production-safe default (apps/api/src/config.rs:21,34), and a log filter. `.env` is gitignored (.gitignore:10); ci.yml:95 and ci.yml:105 use ephemeral service-container credentials. railway.toml holds no secrets. |
+| GitHub Actions permission scope (pages.yml) | PASS (note) | `contents: read, pages: write, id-token: write` (pages.yml:8-11) is the minimal correct set for a Pages deploy; no `contents: write`, no package or deployment scopes. Note: the set is workflow-level, so the build job also holds `id-token: write` it never uses (Low row 1). |
+| Workflow trigger and branch appropriateness | PASS | `push: branches: [main]` plus `workflow_dispatch` (pages.yml:3-6). No `pull_request` trigger, so fork or PR code never builds or deploys with `pages: write` or `id-token: write`; push-to-main matches the every-change-through-a-PR model in docs/decisions.md:128-130 where required CI gates merges. `concurrency: group: pages` with `cancel-in-progress: false` (:13-15) never aborts an in-flight deploy. |
+| Injection via router base (App.tsx) | PASS | apps/web/src/App.tsx:22 derives `routerBase` from `import.meta.env.BASE_URL`, a compile-time constant statically replaced by Vite at build time, with a static regex stripping trailing slashes. No runtime user input, no dynamic regex, no HTML or URL construction from external data; the value feeds only the router `base` prop (:26). |
+| Injection or traversal via Vite base and Pages steps | PASS (note) | vite.config.ts:8 reads `process.env.VITE_BASE_PATH` at build config time only; no user input reaches it. Every pages.yml step uses fixed literal paths (`apps/web/dist`, `index.html`, `404.html` at :33-41); no input interpolation into paths or shell, so no traversal surface. Defensive validation of the base string recommended (Low row 3). Manifest `id`/`start_url`/`scope` are relative `.` (vite.config.ts:21-23), resolving strictly against the manifest URL under the served base. |
+| Pages deploy exposure (source or unintended files) | PASS | The artifact is `apps/web/dist` only (pages.yml:39-41), which is minified build output: no sourcemaps (no `sourceMappingURL` anywhere in dist), no env values beyond the public base path, no `.env`, no source. `dist/` is gitignored (.gitignore:3) so it is never committed; the 404 fallback copies only index.html within dist (:34-35). The repo is public anyway (project Pages site), so the source is already visible. |
+| Dependency change (`@types/node`) | PASS | Dev-only, types-only (apps/web/package.json:21), integrity-pinned to `@types/node@22.20.5` in pnpm-lock.yaml; required by the `"types": ["node", ...]` entry (apps/web/tsconfig.json:4) for `process.env` in vite.config.ts. No runtime code, no install scripts, no new transitive runtime dependencies. |
+| Actions supply-chain consistency | PASS (note) | pages.yml uses actions/checkout@v4, pnpm/action-setup@v4, actions/setup-node@v4, actions/configure-pages@v5, actions/upload-pages-artifact@v3, actions/deploy-pages@v4: all official `actions/*` (plus the pnpm-org action already used in ci.yml:71), major-version pinned exactly like ci.yml. pnpm itself resolves to the pinned `packageManager: pnpm@10.14.0` (package.json:6) and installs run `--frozen-lockfile` (pages.yml:29). Tag pinning rather than SHA pinning is the known carried Low (row 4); posture is unchanged, not regressed. |
+| Existing security posture unchanged | PASS | `unsafe_code = "forbid"` remains workspace-wide (Cargo.toml:37-38) and every member inherits it via `[lints] workspace = true` (apps/api/Cargo.toml:24-25 and all four crates); zero `unsafe` or raw-pointer matches in Rust sources. TS stays `strict` with `noUncheckedIndexedAccess` (tsconfig.base.json:11-12); no `any`, `@ts-ignore`, or `@ts-expect-error` in apps/ or packages/ (sole grep hit is the prose word "anyone" at Leaderboard.tsx:61). clippy `-D warnings` gate (ci.yml:28) unchanged. |
+| Migration immutability holds | PASS | migrations/0001_init.sql:1 remains `/* LiftLog initial schema.` after the earlier revert; historical `liftlog` tokens survive only in `legacy/` (out of scope) and sanctioned doc history. |
+
+### Verification Checklist
+
+- [x] No Critical findings
+- [x] No High findings
+- [x] All Medium findings have mitigations (none raised)
+- [x] Low findings documented (4 rows plus 1 Info)
+- [x] Phase security integrates with prior phases (Phase 0 security review findings re-checked: secrets/config PASS unchanged, action tag-pinning Low carried as row 4, RUN_MIGRATIONS production default confirmed safe at apps/api/src/config.rs:21,34)
+
+### Recurring patterns for other agents
+
+- Workflow-level `permissions:` blocks are the right default, but any job that executes project code (install or build) should hold the narrowest set; `id-token: write` belongs only on jobs that perform OIDC deployment.
+- Build-time env plumbing (`VITE_BASE_PATH` style) is not a runtime attack surface, but it is an origin-rebasing surface: validate the shape of anything that ends up in Vite `base`, `publicPath`, or manifest URLs so a mistyped value cannot point the bundle at a third-party origin.
+- Nothing in this change set blocks merge. Prior open non-blocking items (untracked heart-fitness.svg at the repo root, stale docs/tests.md counts) remain open from the code review.

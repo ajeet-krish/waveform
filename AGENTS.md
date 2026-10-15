@@ -1,4 +1,4 @@
-# LiftLog Platform
+# Waveform Platform
 
 Offline-first lifting, cycling, and climbing tracker for a small friend group. Rust
 (Axum + SQLx) API on Postgres, SolidJS + Vite PWA frontend, in a pnpm + Turbo (JS)
@@ -12,8 +12,8 @@ Backend, Cargo workspace:
 - `cargo test --workspace` runs all Rust tests (scoring, analytics, sync, db).
 - `cargo clippy --workspace --all-targets -- -D warnings` lints; warnings fail.
 - `cargo fmt --check` verifies formatting.
-- `cargo run -p liftlog-api -- migrate` applies migrations and exits.
-- `cargo run -p liftlog-api` serves the API on port 8080; migration on startup is opt-in (`RUN_MIGRATIONS=true`, default false).
+- `cargo run -p waveform-api -- migrate` applies migrations and exits.
+- `cargo run -p waveform-api` serves the API on port 8080; migration on startup is opt-in (`RUN_MIGRATIONS=true`, default false).
 - `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`; commit it, CI fails on drift.
 
 Frontend, pnpm workspace (`apps/web`, `packages/*`):
@@ -27,6 +27,7 @@ Frontend, pnpm workspace (`apps/web`, `packages/*`):
 Local infra:
 
 - `docker compose -f infra/docker-compose.yml up -d` starts Postgres and Mailpit (dev OTP inbox at http://localhost:8025).
+- Web deploys to GitHub Pages; the API and Postgres run locally via Docker (managed hosting deferred).
 
 ## Conventions
 
@@ -51,7 +52,7 @@ Local infra:
 - `packages/api-types` - TypeScript types generated from Rust (committed).
 - `packages/ui` - SolidJS components: charts, heatmap grid, body map. Planned.
 - `migrations` - SQLx SQL: `0001_init.sql` (schema), `0002_seed_catalog.sql` (seed).
-- `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml`.
+- `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml` (API service reference).
 - `legacy` - v1 vanilla-JS PWA, kept only for the phase 1 import wizard.
 - `docs` - architecture, decision records, research.
 
@@ -70,4 +71,5 @@ Local infra:
 - [Architecture](docs/architecture.md) - stack, data model, sync, scoring, phases.
 - [Decisions](docs/decisions.md) - ADRs (stack lock, scoring, PR model).
 - [Research](docs/research.md) - stack evaluation evidence dossier.
-- `docs/reviews.md` and `docs/tests.md` will appear in later phases.
+- [Reviews](docs/reviews.md) - code review findings and resolutions.
+- [Tests](docs/tests.md) - test inventory and coverage notes.

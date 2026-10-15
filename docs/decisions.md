@@ -1,4 +1,4 @@
-# LiftLog Decision Records
+# Waveform Decision Records
 
 Last updated: 2026-10-14
 
@@ -117,7 +117,9 @@ footprint); TypeScript/Bun (immature Postgres tooling); Python/FastAPI (~7x slow
 matched benchmark, GIL); React, Svelte 5, Vue, Angular (React loses update perf and transfer
 size; Svelte 5 loses component inventory and template typing; Vue/Angular trail on both).
 
-## 2026-10-14 - Phase 0: Fork + Pull Requests contribution model [LOCKED]
+## 2026-10-14 - Phase 0: Fork + Pull Requests contribution model [SUPERSEDED IN PART 2026-10-14]
+
+**Status: SUPERSEDED IN PART 2026-10-14**: the origin repo was renamed from ajeet-krish/liftlog to ajeet-krish/waveform on 2026-10-14; the fork and PR model itself is unchanged.
 
 **Context**: v1 lives at atma99/liftlog (original author). The rebuild is a long-term
 portfolio centerpiece maintained in the user's own space.
@@ -151,3 +153,39 @@ precision among friends.
 
 **Trade-offs**: No single overall champion. Deliberate: native metrics carry the real meaning
 per discipline.
+
+## 2026-10-14 - Phase 0: Product renamed to Waveform [LOCKED]
+
+**Context**: The product inherited the name "LiftLog" from v1 and the upstream project. The
+rebuild is a distinct product, so it carries its own identity rather than the inherited one.
+
+**Decision**: Full rename of the display name and of all identifiers that name our project: Rust
+crates `waveform-*` (api, db, scoring, sync, analytics), npm packages `waveform`, `@waveform/web`,
+and `@waveform/api-types`, Postgres database/user/password/volume, environment variables (for
+example `WAVEFORM_TEST_DATABASE_URL`), infra, CI, and docs. The GitHub fork was renamed from
+ajeet-krish/liftlog to ajeet-krish/waveform; upstream atma99/liftlog is unchanged. `legacy/` is
+preserved untouched as the historical v1 artifact and the import source.
+
+**Rationale**: A distinct product identity for the rebuild, while preserving attribution to the
+original author and keeping the v1 import source intact.
+
+**Trade-offs**: Rename churn across the whole tree once; stale local `.env` files and Docker
+volumes named for the old project must be recreated.
+
+## 2026-10-14 - Phase 0: Hosting pivot to GitHub Pages, backend and Postgres deferred [LOCKED]
+
+**Context**: The prior plan targeted Cloudflare Pages for the web app plus Railway Hobby for the
+API and Postgres (about $5/mo).
+
+**Decision**: Deploy the static SPA to GitHub Pages as the project site
+(ajeet-krish.github.io/waveform/) with an env-driven Vite base, a relative PWA scope, and a
+`404.html` SPA fallback. Defer the managed API and Postgres. Run Postgres and Mailpit locally via
+Docker for development. Revisit free-tier managed hosting (Neon or Supabase for Postgres, Render
+or Fly for the web service) in a later phase.
+
+**Rationale**: Zero host cost. Phase 0 stores no data and the app is offline-first, so a deployed
+backend adds nothing yet.
+
+**Trade-offs**: Sign-in, sync, and social stay non-functional in the deployed site until the
+backend lands (they are non-functional everywhere today). Accepted: the deployed site is a preview
+shell and local development carries the real work.

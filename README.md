@@ -1,4 +1,4 @@
-# LiftLog Platform
+# Waveform Platform
 
 Offline-first workout, cycling, and climbing tracker for a small friend
 group. Invite-only accounts, a SolidJS PWA, and a Rust API on Postgres.
@@ -11,7 +11,7 @@ Design docs are authoritative and live in `docs/` (`architecture.md`,
 
 ## Phase status
 
-- Phase 0: monorepo, schema + migrations, CI/CD, deploy skeleton (in progress)
+- Phase 0: monorepo, schema + migrations, CI/CD, web deploy to GitHub Pages, local API + Postgres (in progress)
 - Phase 1: training core (workouts, exercises), offline sync, v1 data import (not started)
 - Phase 2: activities (cycling, climbing), body stats, routines (not started)
 - Phase 3: social (boards, heatmap, feed, kudos) (not started)
@@ -20,7 +20,7 @@ Design docs are authoritative and live in `docs/` (`architecture.md`,
 ## Repository layout
 
 ```
-liftlog/
+waveform/
 |- apps/
 |  |- api/            Axum HTTP API (routers, handlers, extractors)
 |  |- web/            SolidJS + Vite PWA (preview screens in phase 0)
@@ -32,10 +32,10 @@ liftlog/
 |- packages/
 |  |- api-types/      TypeScript types generated from Rust (committed)
 |- migrations/        SQLx migrations (schema + catalog seed + hardening)
-|- infra/             docker-compose.yml (Postgres + Mailpit), railway.toml
+|- infra/             docker-compose.yml (Postgres + Mailpit), railway.toml (API ref)
 |- legacy/            v1 PWA, kept only for the phase 1 import wizard
 |- docs/              Architecture, decision records, research
-\- .github/workflows/ CI: rust, ts-rs drift, JS workspace, migrations
+\- .github/workflows/ CI: rust, ts-rs drift, JS workspace, migrations; Pages deploy
 ```
 
 ## Prerequisites
@@ -49,12 +49,18 @@ liftlog/
 1. Install JS dependencies: `pnpm install`
 2. Start local services: `docker compose -f infra/docker-compose.yml up -d`
 3. Copy the environment template: `cp .env.example .env`
-4. Apply migrations: `cargo run -p liftlog-api -- migrate`
-5. Run the API (serves on port 8080): `cargo run -p liftlog-api`
+4. Apply migrations: `cargo run -p waveform-api -- migrate`
+5. Run the API (serves on port 8080): `cargo run -p waveform-api`
    (startup migration is opt-in: `.env` sets `RUN_MIGRATIONS=true`)
 6. Check it: `curl http://localhost:8080/healthz`
 
 Mailpit captures dev OTP emails at `http://localhost:8025`.
+
+Hosting: the web app deploys as a static SPA to GitHub Pages at
+https://ajeet-krish.github.io/waveform/. The API and Postgres are deferred:
+Phase 0 stores no data and the app is offline-first, so managed hosting is not
+needed yet. Run both locally with the steps above; a later phase adds a
+free-tier managed Postgres (Neon or Supabase) and web service (Render or Fly).
 
 ## Common commands
 
@@ -65,7 +71,7 @@ Rust:
 - `cargo clippy` and `cargo fmt` handle linting and formatting.
 - `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`
   from the Rust models. Commit the result; CI fails on drift.
-- `cargo test -p liftlog-db` runs the schema and model decode tests; it
+- `cargo test -p waveform-db` runs the schema and model decode tests; it
   needs a Postgres URL (see the header of `crates/db/tests/schema.rs`).
 
 JavaScript:
@@ -80,7 +86,7 @@ Database:
   seeds the global exercise catalog (v1 names preserved exactly for import),
   and `migrations/0003_hardening.sql` applies the phase 0 review hardening
   (float8 measurement columns, sync pull indexes, constraint ranges).
-- Migrations run through the explicit `cargo run -p liftlog-api -- migrate`
+- Migrations run through the explicit `cargo run -p waveform-api -- migrate`
   subcommand; `RUN_MIGRATIONS=true` opts into startup migration (default
   is false so production never runs DDL on boot).
 

@@ -1,4 +1,4 @@
-# LiftLog Research Notes
+# Waveform Research Notes
 
 Last updated: Oct 14, 2026
 
@@ -51,7 +51,7 @@ citations delivered to orchestrator. Key data points below.
   SEO sources, not verified against primary TFB. FLAG.
 - Hono benchmarks are self-published; Elysia "21x Express" marketing vs ~5x measured (Medium Hainan).
 
-### Relevance to LiftLog
+### Relevance to Waveform
 Expected load <=10 users (<=10 rps peak). Every option is 1000x+ over-provisioned; raw throughput
 differences are immaterial to load. Differentiators are type safety/regression-safety, cold start
 if serverless, Postgres query tooling, and ecosystem fit - not RPS.
