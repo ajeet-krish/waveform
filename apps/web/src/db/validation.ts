@@ -7,6 +7,18 @@
 
 const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * The set_entries CHECK bounds in one place. The SQL CHECKs remain
+ * authoritative; the form layer (lib/forms.ts) validates against these same
+ * constants, so UI input can never reach assertValidSet and trip it.
+ */
+export const SET_RULES = {
+  repsMin: 1,
+  repsMax: 36,
+  weightMinKg: 0,
+  weightMaxKg: 1500,
+} as const;
+
 /** Raised when a local row violates a schema-equivalent constraint. */
 export class LocalValidationError extends Error {
   /** Human-readable one-per-violation list; defaults to the message. */
@@ -44,13 +56,14 @@ function fail(what: string, issues: string[]): never {
  */
 export function assertValidSet(set: SetCheck): void {
   const issues: string[] = [];
-  if (!Number.isInteger(set.reps) || set.reps < 1 || set.reps > 36) {
-    issues.push(`reps must be an integer in 1..36 (got ${set.reps})`);
+  const { repsMin, repsMax, weightMinKg, weightMaxKg } = SET_RULES;
+  if (!Number.isInteger(set.reps) || set.reps < repsMin || set.reps > repsMax) {
+    issues.push(`reps must be an integer in ${repsMin}..${repsMax} (got ${set.reps})`);
   }
   if (typeof set.weight_kg !== "number" || !Number.isFinite(set.weight_kg)) {
     issues.push(`weight_kg must be a finite number (got ${set.weight_kg})`);
-  } else if (set.weight_kg < 0 || set.weight_kg > 1500) {
-    issues.push(`weight_kg must be in 0..1500 (got ${set.weight_kg})`);
+  } else if (set.weight_kg < weightMinKg || set.weight_kg > weightMaxKg) {
+    issues.push(`weight_kg must be in ${weightMinKg}..${weightMaxKg} (got ${set.weight_kg})`);
   }
   if (!Number.isInteger(set.set_index) || set.set_index < 0) {
     issues.push(`set_index must be an integer >= 0 (got ${set.set_index})`);

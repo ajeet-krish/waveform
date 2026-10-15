@@ -1,6 +1,26 @@
-import { defineConfig } from "vite";
+import { copyFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vite";
 import solid from "vite-plugin-solid";
 import { VitePWA } from "vite-plugin-pwa";
+
+const configDir = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * GitHub Pages serves a static tree: a deep link like /waveform/history
+ * would 404 without a file there. Copying index.html to 404.html makes
+ * Pages answer every deep link with the SPA shell, which the router then
+ * routes. Runs after every other plugin has finished with index.html.
+ */
+function spaDeepLinkFallback(): Plugin {
+  return {
+    name: "waveform-spa-deep-link-fallback",
+    closeBundle() {
+      copyFileSync(resolve(configDir, "dist/index.html"), resolve(configDir, "dist/404.html"));
+    },
+  };
+}
 
 // Base path is env-driven so local dev and tests keep "/" while the GitHub
 // Pages build (see .github/workflows/pages.yml) serves under /waveform/.
@@ -52,6 +72,7 @@ export default defineConfig(() => ({
         ],
       },
     }),
+    spaDeepLinkFallback(),
   ],
   build: {
     target: "es2022",

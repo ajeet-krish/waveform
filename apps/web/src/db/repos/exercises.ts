@@ -20,6 +20,13 @@ export type ExerciseCreateInput = {
   equipment?: string | null;
 };
 
+/** Partial patch for a custom exercise; omitted fields keep their value. */
+export type ExerciseUpdateInput = {
+  name?: string;
+  muscle_group?: string;
+  equipment?: string | null;
+};
+
 export type ExerciseMutation = {
   row: LocalRow<Exercise>;
   op: OutboxOp<"exercises">;
@@ -32,6 +39,8 @@ export type ExerciseRepo = {
   get(id: string): Promise<LocalRow<Exercise> | undefined>;
   /** Creates a per-user custom exercise with a create op. */
   createCustom(input: ExerciseCreateInput): Promise<ExerciseMutation>;
+  /** Patches name/muscle_group/equipment on a custom exercise with an update op. Catalog rows are refused. */
+  updateCustom(id: string, input: ExerciseUpdateInput): Promise<ExerciseMutation>;
   /** Tombstones a custom exercise with a delete op. Catalog rows are refused. */
   softDelete(id: string): Promise<ExerciseMutation>;
 };
@@ -63,6 +72,34 @@ export function createExerciseRepo(db: WaveformDb, deps: RepoDeps): ExerciseRepo
       };
       const op = buildOutboxOp("exercises", "create", row, now);
       return db.transaction("rw", db.exercises, db.outbox, async () => {
+        await db.exercises.put(row);
+        await db.outbox.add(op);
+        return { row, op };
+      });
+    },
+
+    updateCustom(id: string, input: ExerciseUpdateInput): Promise<ExerciseMutation> {
+      const now = nowDate(deps);
+      const iso = now.toISOString();
+      return db.transaction("rw", db.exercises, db.outbox, async () => {
+        const existing = await db.exercises.get(id);
+        if (!existing) {
+          throw new LocalValidationError(`exercise not found: ${id}`);
+        }
+        if (existing.owner_id === null) {
+          throw new LocalValidationError(
+            "global catalog exercise cannot be edited",
+            [`exercise ${id} is a catalog row (owner_id null)`],
+          );
+        }
+        const row: LocalRow<Exercise> = {
+          ...existing,
+          name: input.name ?? existing.name,
+          muscle_group: input.muscle_group ?? existing.muscle_group,
+          equipment: input.equipment !== undefined ? input.equipment : existing.equipment,
+          updated_at: iso,
+        };
+        const op = buildOutboxOp("exercises", "update", row, now);
         await db.exercises.put(row);
         await db.outbox.add(op);
         return { row, op };

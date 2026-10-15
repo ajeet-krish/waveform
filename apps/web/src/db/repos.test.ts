@@ -106,6 +106,65 @@ describe("exercises repo", () => {
     expect(live.map((row) => row.name)).toEqual(["Alpha Row", "Zulu Row"]);
   });
 
+  it("updateCustom patches a custom row and queues one update op", async () => {
+    const { db, repos } = harness("update-custom");
+    const created = await repos.exercises.createCustom({
+      name: "Zettel Curl",
+      muscle_group: "biceps",
+      equipment: "dumbbell",
+    });
+
+    const { row, op } = await repos.exercises.updateCustom(created.row.id, {
+      name: "Zettel Curl 2",
+    });
+    expect(row.id).toBe(created.row.id);
+    expect(row.name).toBe("Zettel Curl 2");
+    expect(row.muscle_group).toBe("biceps");
+    expect(row.equipment).toBe("dumbbell");
+    expect(row.owner_id).toBe("user-1");
+    expect(row.created_at).toBe(created.row.created_at);
+    expect(row.updated_at > created.row.updated_at).toBe(true);
+    expect(await db.exercises.get(row.id)).toEqual(row);
+
+    const ops = await repos.outbox.listPending();
+    expect(ops.map((queued) => queued.action)).toEqual(["create", "update"]);
+    const queued = ops[1];
+    expect(queued?.entity).toBe("exercises");
+    expect(queued?.op_id).toBe(op.op_id);
+    expect(queued?.payload).toEqual(row);
+    expect(queued?.updated_at).toBe(row.updated_at);
+
+    // equipment accepts an explicit null to clear the column.
+    const cleared = await repos.exercises.updateCustom(created.row.id, { equipment: null });
+    expect(cleared.row.equipment).toBeNull();
+    expect(cleared.row.name).toBe("Zettel Curl 2");
+    expect(cleared.op.action).toBe("update");
+  });
+
+  it("updateCustom refuses catalog rows and writes nothing", async () => {
+    const { db, repos } = harness("update-custom-catalog");
+    const catalogId = crypto.randomUUID();
+    const stamp = "2026-10-14T00:00:00.000Z";
+    await db.exercises.put({
+      id: catalogId,
+      owner_id: null,
+      name: "Bench Press (Barbell)",
+      muscle_group: "chest",
+      equipment: "barbell",
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at: null,
+    });
+
+    await expect(
+      repos.exercises.updateCustom(catalogId, { name: "Renamed", muscle_group: "legs" }),
+    ).rejects.toThrow(LocalValidationError);
+    expect(await db.outbox.count()).toBe(0);
+    const row = await db.exercises.get(catalogId);
+    expect(row?.name).toBe("Bench Press (Barbell)");
+    expect(row?.updated_at).toBe(stamp);
+  });
+
   it("softDelete refuses catalog rows and tombstones custom rows with a delete op", async () => {
     const { db, repos } = harness("soft-delete");
     const catalogId = crypto.randomUUID();
@@ -229,6 +288,99 @@ describe("workouts repo", () => {
     expect(tree?.entries.map((slot) => slot.entry.order_index)).toEqual([0, 1, 2]);
     expect(tree?.entries[0]?.sets.map((set) => set.set_index)).toEqual([0, 1]);
     expect(await repos.workouts.getTree("missing-workout")).toBeUndefined();
+  });
+
+  it("listAllTrees sorts local_date desc then id desc and skips tombstones", async () => {
+    const { db, repos } = harness("all-trees-order");
+    const stamp = "2026-10-14T00:00:00.000Z";
+    const session = (id: string, local_date: string, deleted_at: string | null = null) => ({
+      id,
+      user_id: "user-1",
+      local_date,
+      started_at: null,
+      duration_min: null,
+      routine_id: null,
+      notes: null,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at,
+    });
+    await db.workout_sessions.bulkPut([
+      session("sess-a", "2026-10-10"),
+      session("sess-b", "2026-10-14"),
+      session("sess-c", "2026-10-14"),
+      session("sess-d", "2026-10-15", stamp),
+    ]);
+
+    const trees = await repos.workouts.listAllTrees();
+    expect(trees.map((tree) => tree.session.id)).toEqual(["sess-c", "sess-b", "sess-a"]);
+    expect(trees.map((tree) => tree.session.local_date)).toEqual([
+      "2026-10-14",
+      "2026-10-14",
+      "2026-10-10",
+    ]);
+  });
+
+  it("listAllTrees nests live entries by order_index and live sets by set_index", async () => {
+    const { db, repos } = harness("all-trees-nested");
+    const stamp = "2026-10-14T00:00:00.000Z";
+    await db.workout_sessions.put({
+      id: "sess-1",
+      user_id: "user-1",
+      local_date: "2026-10-14",
+      started_at: null,
+      duration_min: null,
+      routine_id: null,
+      notes: null,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at: null,
+    });
+    const entry = (id: string, order_index: number, deleted_at: string | null = null) => ({
+      id,
+      workout_id: "sess-1",
+      exercise_id: `exercise-${id}`,
+      order_index,
+      notes: null,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at,
+    });
+    await db.exercise_entries.bulkPut([
+      entry("entry-2", 1),
+      entry("entry-1", 0),
+      entry("entry-dead", 2, stamp),
+    ]);
+    const set = (
+      id: string,
+      exercise_entry_id: string,
+      set_index: number,
+      deleted_at: string | null = null,
+    ) => ({
+      id,
+      exercise_entry_id,
+      set_index,
+      weight_kg: 100,
+      reps: 5,
+      is_warmup: false,
+      e1rm_kg: 112.5,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at,
+    });
+    await db.set_entries.bulkPut([
+      set("set-1", "entry-1", 1),
+      set("set-0", "entry-1", 0),
+      set("set-dead", "entry-1", 2, stamp),
+      set("set-2", "entry-2", 0),
+    ]);
+
+    const trees = await repos.workouts.listAllTrees();
+    expect(trees).toHaveLength(1);
+    expect(trees[0]?.session.id).toBe("sess-1");
+    expect(trees[0]?.entries.map((slot) => slot.entry.id)).toEqual(["entry-1", "entry-2"]);
+    expect(trees[0]?.entries[0]?.sets.map((setRow) => setRow.id)).toEqual(["set-0", "set-1"]);
+    expect(trees[0]?.entries[1]?.sets).toHaveLength(1);
   });
 
   it("addSet stores e1rm_kg locally but keeps it out of the set_entries payload", async () => {

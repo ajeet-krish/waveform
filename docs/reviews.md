@@ -317,3 +317,65 @@ Scope: `packages/scoring/**` (TS scoring port + shared golden fence), `crates/sc
 - The shared golden fence is the pattern to keep: one JSON vector file, consumed by both the Rust test and the TS test, with a version field and a single declared tolerance. Any future formula change must move both implementations and the vectors together or one side of the fence fails.
 - The repo transactional contract (row writes and outbox appends in one `db.transaction("rw", ..., db.outbox)`, soft deletes with full-tombstone delete payloads, generated columns stripped from wire payloads via a `*Write` type) should be followed exactly by any new entity repo in later sub-phases.
 - SQL-derived constants seeded into TS (catalog names, CHECK bounds) need a parsing parity test like catalogParity.test.ts, and the SQL file must land in turbo.json `globalDependencies` or the test cache will serve stale results.
+
+## 2026-10-15 - Phase 1b: workout core (code review)
+
+Verdict: PASS (execution gates NOT RUN)
+
+Scope: uncommitted sub-phase 1b change set on branch `main`: new `apps/web/src/lib/{format,forms,
+workoutLog,history,exerciseStats,draftAutosave,backup,catalog,setInput,sparkline,exerciseDetail,
+errors}.ts` plus tests, `lib/appData.tsx`, routes `Setup`/`HistoryDetail`/`ExerciseHistory`,
+components `ConfirmDialog`/`Sparkline` and `workout/{ActiveSession,SetLog,ExercisePicker}`, edited
+`routes/{Workout,History,Exercises,Profile}.tsx`, `App.tsx`, `components/{Shell,EmptyState}.tsx`,
+`styles/{shell,app}.css`, `vite.config.ts`, and the three 1a data-core additions
+(`exercises.updateCustom`, `workouts.listAllTrees`, `validation.SET_RULES`). Deleted
+`components/PreviewBanner.tsx`. Static review of every file in scope. IMPORTANT: this review
+environment had no shell tool, so `git status`/`git diff`, `pnpm install/build/lint/test`, and the
+cargo suite (`test`, `clippy -D warnings`, `fmt --check`, `test export_ts`) could NOT be executed;
+the git-level cleanliness checks (legacy/ and Rust untouched, generated.ts drift) are equally
+unverified and must be run before commit.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1. Data wiring (repos via `useAppData`, no `createDefaultRepos`, reducer-only draft mutations, autosave lifecycle, finish flow, `LocalValidationError`) | PASS | All screens read through `useAppData().repos()` (Workout.tsx:47, History.tsx:68, Exercises.tsx:48, Profile.tsx:17, HistoryDetail.tsx:39, ExerciseHistory.tsx:39, Setup.tsx:21) with `createLocalQuery` for reads; `createDefaultRepos` has zero call sites (db/index.ts:24). Draft edits flow only through `mutate` + workoutLog reducers (Workout.tsx:123-134; ActiveSession.tsx:87-104,130-132). Autosave debounces 400ms and flushes on pagehide, visibilitychange hidden, and cleanup (Workout.tsx:83-110). `finishSession` computes `computeDurationMin`, persists via `schedule()` + `flush()`, then atomic `drafts.commit` (drafts.ts:69-148); failure keeps the draft and surfaces `LocalValidationError.issues` in a role=alert region (Workout.tsx:149-171, 207-215; errors.ts:14-22). `discardSession` settles the autosave chain before delete (Workout.tsx:173-190). |
+| 2. 1a additions correct and non-regressing | PASS | `updateCustom` is one `db.transaction("rw", db.exercises, db.outbox)` with catalog refusal for edit and delete (exercises.ts:81-134), asserted at repos.test.ts:109-202 (refusals write nothing, outbox count 0). `listAllTrees` filters all three tombstone layers and sorts local_date desc then id desc (workouts.ts:257-274; repos.test.ts:293-384). `SET_RULES` mirrors the SQL CHECKs and is shared by forms.ts and setInput.ts (validation.ts:15-20; repos.test.ts:526-591). 1a behavior intact; `LocalValidationError.issues` is additive. Low: guards compare `owner_id` to null but never to `deps.userId`. |
+| 3. History grouping and exercise stats fence | PASS | Monday-start weeks and day headings verified (week.ts:35-50, format.ts:128-140, history.ts:90-137; history.test.ts:104-138 pins week starts, ISO week numbers 42/41, and heading order). Warmups and weight-0 sets excluded from best e1RM and volume everywhere via `isWorkingSet` (workoutLog.ts:33-41; history.ts:53-64; exerciseStats.ts:43-107); warmups remain visible only in tables. All e1RM values come from `@waveform/scoring` `e1rmBrzycki` or its stored copy, so the scoring fence is untouched. |
+| 4. Export | PASS | `WaveformBackupV1` covers profile, exercises, workout_sessions, exercise_entries, set_entries with tombstones and a versioned envelope (backup.ts:16-45; backup.test.ts:92-118). `downloadBackup` is Blob plus object URL plus anchor click with revoke (backup.ts:62-73); zero network APIs exist anywhere in apps/web/src. Filename `waveform-backup-YYYY-MM-DD.json`, pretty JSON with trailing newline, both tested (backup.test.ts:121-144). |
+| 5. Accessibility | PASS | Labels (for/id via createUniqueId, aria-labels on row inputs and forms), aria-invalid plus aria-describedby on invalid fields (SetLog.tsx:212-242; Setup.tsx:105-112), role=alert on every status region, ConfirmDialog with initial focus on Cancel, Escape, Tab trap, focus restore with document.contains guard, role=dialog and aria-modal (ConfirmDialog.tsx:59-111), sparkline role=img with generated spoken summary (Sparkline.tsx:55-60; sparkline.ts:84-119), sr-only table captions and warmup expansions. Native controls throughout, so keyboard reachability is complete. Info notes below. |
+| 6. Conventions | PASS | strict + noUncheckedIndexedAccess + verbatimModuleSyntax (tsconfig.base.json:10-12); no `any`, `@ts-ignore`, or `@ts-expect-error`; `import type` throughout; for...of with zero forEach/for-in. Class vocabulary reused and every class exists in CSS. No new design tokens: hex only in tokens.css; app.css additions use var() except one hardcoded rgb backdrop (app.css:623) matching the pre-existing shell.css:33 pattern. No em dashes or double hyphens in prose; "Nothing is saved yet" copy fully removed (zero matches). |
+| 7. 404 SPA fallback | PASS | `spaDeepLinkFallback` copies dist/index.html to dist/404.html in closeBundle (vite.config.ts:16-23), after vite-plugin-pwa generates the service worker (plugin order vite.config.ts:29-76), so 404.html is correctly outside the precache while navigateFallback covers offline. Deep links to /waveform/<route> resolve through the router base (App.tsx:25, verified in the rebrand review). Info: path assumes dist under the config dir, and pages.yml:34-35 duplicates the copy. |
+| 8. Cleanliness and regressions | NOT RUN | Needs git and cargo (see scope note). Static evidence matches the stated scope: everything inspected is under apps/web plus docs; no new dependencies; generated.ts is consumed read-only; no Rust code touched by the new modules; scoring imported, never forked. |
+| Command gates (pnpm install/build/lint/test; cargo test, clippy, fmt, export_ts) | NOT RUN | No shell in this review environment. Static proxy: web tests now enumerate 163 `it(...)` blocks (58 at the 1a baseline, +105 new); scoring tests untouched (42 expected); Rust out of the change set (prior 84/84). Static counts only, not executed results. |
+
+### Findings (non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low | apps/web/src/routes/HistoryDetail.tsx:67,85; apps/web/src/db/repos/workouts.ts:249-255 | `getTree` returns tombstoned sessions (only entries/sets are filtered), so a deep link to a deleted session renders an empty session view instead of the "Session not found" state the route promises at HistoryDetail.tsx:52-63. | Return undefined from `getTree` when `session.deleted_at !== null`, or skip the render in SessionView. |
+| Low | apps/web/src/components/workout/SetLog.tsx:98-99,209-210 | Weight inputs carry `min`/`max` in kg (0..1500) while holding the display unit: a lb field claims a 1500 lb ceiling (about 680 kg) and understates the real bound. Parsing is correct (setInput.ts:31-38 converts first; novalidate prevents blocking) but the attributes misstate the constraint, and the max error copy reads "1500 kg or less" in lb mode (setInput.ts:36). | Convert the bounds with `toDisplayWeight` for the attributes, or drop min/max and rely on the parse layer. |
+| Low | apps/web/src/db/repos/exercises.ts:89,117 | Catalog refusal checks `owner_id === null` only; a custom row owned by another `user_id` would pass `updateCustom` and `softDelete`. workouts mutations likewise never compare `session.user_id` to `deps.userId` (workouts.ts:162-232). Same ownership pattern flagged in the Phase 0 security review for sync ops. | Require `owner_id === deps.userId` / `user_id === deps.userId` in every mutation guard. |
+| Info | apps/web/vite.config.ts:20 | Fallback copy hardcodes `dist` under the config dir while Vite resolves outDir from `root`; correct in-repo but fragile to a foreign cwd. pages.yml:34-35 duplicates the copy. | Derive from resolved root/outDir; keep one source of truth for the copy. |
+| Info | apps/web/src/db/index.ts:24 | `createDefaultRepos` has zero call sites after the appData bootstrap replaced it. | Delete or document as a helper. |
+| Info | apps/web/src/lib/forms.ts; apps/web/src/lib/exerciseStats.ts:81 | `createForm` family and `setsForExercise` are consumed only by tests; Setup.tsx:53-76 and Exercises.tsx ExerciseForm hand-roll the same lifecycle. | Wire screens to forms.ts later or note it as the upcoming form layer. |
+| Info | apps/web/src/components/workout/ActiveSession.tsx:82; apps/web/src/routes/Exercises.tsx:163 | `panel-body` class has no CSS rule; `.panel` supplies the padding. | Style it or drop it. |
+| Info | apps/web/src/components/ConfirmDialog.tsx:104-141 | Background content is not inert/aria-hidden while the modal is open; aria-modal is the only isolation. | Toggle aria-hidden on siblings or use native `dialog`.showModal(). |
+| Info | apps/web/src/routes/HistoryDetail.tsx:115 | `summarizeSession(props.tree, new Map())` passes an empty name map; the computed names are discarded. | Pass the real map or add a names-free summary variant. |
+| Info | apps/web/src/routes/Setup.tsx:53; apps/web/src/lib/today.ts:14,19 | Missing explicit return types where the rest of the new code annotates them. | Consistency pass. |
+
+### Verification Checklist
+
+- [x] All code checks passed (7 PASS, 1 NOT RUN)
+- [ ] Command gates re-run (impossible in this review environment; must run before commit)
+- [x] No critical issues found (no Critical, High, or Medium)
+- [x] Code follows project conventions
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation
+- [x] Phase code integrates cleanly with prior phases (1a additive; scoring fence untouched; zero new dependencies)
+
+### Recurring patterns for other agents
+
+- The draft pipeline is the template for future write paths: pure reducers (no clock, ids pre-generated at insert), a debounced serialized autosave flushing on pagehide/visibilitychange/cleanup, and one atomic commit where a `LocalValidationError` aborts the transaction and leaves the draft intact.
+- Repo mutation guards must compare `owner_id`/`user_id` to `deps.userId`, not just to null; the null check protects catalog rows but not cross-user rows.
+- UI constraints in display units must be converted at the same boundary that converts values back to storage units; validator bounds in kg cannot be pasted onto a lb input's min/max.
+- View-model tests (Monday grouping, warmup exclusion, "no top e1RM without a load") are acting as the spec for the pure lib layer; keep them beside every new module.

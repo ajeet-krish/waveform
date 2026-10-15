@@ -92,6 +92,23 @@ export function toSetWrite({ e1rm_kg: _generated, ...rest }: LocalRow<SetEntry>)
   return rest;
 }
 
+/** Loads one session's live entries (order_index asc) and their live sets (set_index asc). */
+async function loadTree(db: WaveformDb, session: LocalRow<WorkoutSession>): Promise<WorkoutTree> {
+  const entryRows = await db.exercise_entries.where("workout_id").equals(session.id).toArray();
+  const liveEntries = entryRows
+    .filter((row) => row.deleted_at === null)
+    .sort((a, b) => a.order_index - b.order_index);
+  const entries: WorkoutTree["entries"] = [];
+  for (const entry of liveEntries) {
+    const setRows = await db.set_entries.where("exercise_entry_id").equals(entry.id).toArray();
+    const liveSets = setRows
+      .filter((row) => row.deleted_at === null)
+      .sort((a, b) => a.set_index - b.set_index);
+    entries.push({ entry, sets: liveSets });
+  }
+  return { session, entries };
+}
+
 export type WorkoutRepo = {
   create(input: WorkoutCreateInput): Promise<WorkoutMutation>;
   update(id: string, patch: WorkoutPatch): Promise<WorkoutMutation>;
@@ -101,6 +118,12 @@ export type WorkoutRepo = {
   listByDateRange(from: string, to: string): Promise<LocalRow<WorkoutSession>[]>;
   /** Session with entries in order_index order and sets in set_index order. */
   getTree(id: string): Promise<WorkoutTree | undefined>;
+  /**
+   * Every live session (tombstones excluded) with its live entries and sets,
+   * sorted by local_date desc then id desc: the newest day first, newest id
+   * first within one day.
+   */
+  listAllTrees(): Promise<WorkoutTree[]>;
   addEntry(input: EntryCreateInput): Promise<EntryMutation>;
   updateEntry(id: string, patch: EntryPatch): Promise<EntryMutation>;
   /** Soft-deletes an entry and its sets; one delete op per row. */
@@ -228,19 +251,26 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
       if (!session) {
         return undefined;
       }
-      const entryRows = await db.exercise_entries.where("workout_id").equals(id).toArray();
-      const liveEntries = entryRows
-        .filter((row) => row.deleted_at === null)
-        .sort((a, b) => a.order_index - b.order_index);
-      const entries: WorkoutTree["entries"] = [];
-      for (const entry of liveEntries) {
-        const setRows = await db.set_entries.where("exercise_entry_id").equals(entry.id).toArray();
-        const liveSets = setRows
-          .filter((row) => row.deleted_at === null)
-          .sort((a, b) => a.set_index - b.set_index);
-        entries.push({ entry, sets: liveSets });
+      return loadTree(db, session);
+    },
+
+    async listAllTrees(): Promise<WorkoutTree[]> {
+      const rows = await db.workout_sessions.toArray();
+      const live = rows.filter((row) => row.deleted_at === null);
+      live.sort((a, b) => {
+        if (a.local_date !== b.local_date) {
+          return a.local_date < b.local_date ? 1 : -1;
+        }
+        if (a.id === b.id) {
+          return 0;
+        }
+        return a.id < b.id ? 1 : -1;
+      });
+      const trees: WorkoutTree[] = [];
+      for (const session of live) {
+        trees.push(await loadTree(db, session));
       }
-      return { session, entries };
+      return trees;
     },
 
     addEntry(input: EntryCreateInput): Promise<EntryMutation> {

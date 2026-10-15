@@ -5,6 +5,8 @@ export type EmptyAction = {
   label: string;
   /** Real destination when one exists; otherwise the action renders disabled. */
   href?: string;
+  /** Fires an in-page action when there is no destination to navigate to. */
+  onClick?: () => void;
   variant?: "primary" | "secondary";
 };
 
@@ -27,16 +29,23 @@ export default function EmptyState(props: {
           <For each={props.actions}>
             {(action) =>
               action.href ? (
-                <A href={action.href} class={`btn btn-${action.variant ?? "primary"}`}>
+                <A
+                  href={action.href}
+                  class={`btn btn-${action.variant ?? "primary"}`}
+                  onClick={action.onClick}
+                >
                   {action.label}
                 </A>
-              ) : (
+              ) : action.onClick ? (
                 <button
                   type="button"
-                  class="btn btn-secondary"
-                  disabled
-                  title="Arrives with the data layer"
+                  class={`btn btn-${action.variant ?? "secondary"}`}
+                  onClick={action.onClick}
                 >
+                  {action.label}
+                </button>
+              ) : (
+                <button type="button" class="btn btn-secondary" disabled title="Not available yet">
                   {action.label}
                 </button>
               )

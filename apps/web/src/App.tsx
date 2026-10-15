@@ -5,14 +5,17 @@ import Body from "./routes/Body";
 import Climbing from "./routes/Climbing";
 import Cycling from "./routes/Cycling";
 import Dashboard from "./routes/Dashboard";
+import ExerciseHistory from "./routes/ExerciseHistory";
 import Exercises from "./routes/Exercises";
 import Feed from "./routes/Feed";
 import Heatmap from "./routes/Heatmap";
 import History from "./routes/History";
+import HistoryDetail from "./routes/HistoryDetail";
 import Leaderboard from "./routes/Leaderboard";
 import Login from "./routes/Login";
 import NotFound from "./routes/NotFound";
 import Profile from "./routes/Profile";
+import Setup from "./routes/Setup";
 import SocialLayout from "./routes/SocialLayout";
 import Workout from "./routes/Workout";
 
@@ -25,9 +28,12 @@ export default function App() {
   return (
     <Router root={Shell} base={routerBase}>
       <Route path="/" component={Dashboard} />
+      <Route path="/setup" component={Setup} />
       <Route path="/workout" component={Workout} />
       <Route path="/history" component={History} />
+      <Route path="/history/:id" component={HistoryDetail} />
       <Route path="/exercises" component={Exercises} />
+      <Route path="/exercises/:id" component={ExerciseHistory} />
       <Route path="/activities" component={Activities} />
       <Route path="/activities/cycling" component={Cycling} />
       <Route path="/activities/climbing" component={Climbing} />

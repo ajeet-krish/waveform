@@ -1,4 +1,4 @@
-/* App chrome: command bar, preview banner, week strip, tab bar, page header. */
+/* App chrome: command bar, week strip, tab bar, page header. */
 
 .shell {
   display: flex;
@@ -106,24 +106,6 @@
 .cmd-profile:hover {
   color: var(--paper);
   background: var(--console-raised);
-}
-
-/* Preview banner */
-
-.preview-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  background: var(--console-raised);
-  border-bottom: 1px solid var(--etch);
-  font-size: var(--text-xs);
-  color: var(--paper-dim);
-}
-
-.preview-banner .label {
-  color: var(--live);
 }
 
 /* Week strip: the signature. Always visible, Monday start, today ringed. */

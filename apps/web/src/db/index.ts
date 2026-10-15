@@ -2,8 +2,9 @@
  * Local-first data core entry point.
  *
  * Exposes the app-wide IndexedDB singleton plus a helper that builds the
- * repo set for the device's stored profile. No UI code is wired to this
- * module yet (sub-phase 1a adds the data core only).
+ * repo set for the device's stored profile. The app shell reads the
+ * profile through lib/appData.tsx, which decides between first-run setup
+ * and the ready state.
  */
 
 import { createWaveformDb } from "./schema";
@@ -35,7 +36,7 @@ export { ensureCatalog } from "./seed/ensureCatalog";
 export { CATALOG_SEED } from "./seed/catalog";
 export { catalogSeedId } from "./seed/uuidV5";
 export { createLocalQuery, observeQuery, type LocalQuery } from "./query";
-export { LocalValidationError } from "./validation";
+export { LocalValidationError, SET_RULES } from "./validation";
 export { buildOutboxOp, createOutboxRepo, type OutboxRepo } from "./outbox";
 export type {
   LocalProfile,

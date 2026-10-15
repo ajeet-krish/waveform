@@ -1,5 +1,6 @@
 /* Page content: panels, stat lists, empty states, segmented controls,
- * discipline cards, the effort grid, and the login form. */
+ * discipline cards, the effort grid, data tables, sparklines, badges,
+ * and the auth forms. */
 
 .quick-actions {
   display: flex;
@@ -341,6 +342,93 @@ a.discipline:hover {
   background: var(--heat-4);
 }
 
+/* Data table: telemetry rows (history, exercise stats, backup) */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--etch);
+  color: var(--paper-faint);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.data-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--etch);
+  color: var(--paper);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr:hover td {
+  background: var(--console-high);
+}
+
+/* Sparkline: one series across days; magenta means live data, amber a record */
+
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 56px;
+  overflow: visible;
+}
+
+.sparkline-axis {
+  stroke: var(--etch);
+  stroke-width: 1;
+}
+
+.sparkline-line {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sparkline-dot {
+  fill: var(--live);
+}
+
+.sparkline-dot.is-record {
+  fill: var(--load);
+}
+
+/* Badge: mono chip for a state that earns a label (PR, warmup, on the board) */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--etch);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+}
+
+/* Live only: magenta stays reserved for live data points. */
+.badge.is-live {
+  border-color: var(--live);
+  color: var(--live);
+}
+
 /* Profile */
 
 .def-list {
@@ -458,6 +546,108 @@ a.discipline:hover {
   flex: 1;
   height: 1px;
   background: var(--etch);
+}
+
+/* Workout console: compact set controls, muscle chips, wide-table scroll,
+ * inline links, and the confirm dialog. Every value comes from tokens. */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* Muscle chips wrap instead of forming one long segmented strip. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.chip-row .seg-btn,
+.chip-row .seg-btn + .seg-btn {
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+}
+
+/* Add-set row: labels and compact inputs share one wrapping line. */
+.set-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.input-sm {
+  width: auto;
+  min-width: 5rem;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  text-align: right;
+}
+
+.input-check {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: var(--live);
+  cursor: pointer;
+}
+
+/* Row actions sit against the table's right edge. */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* Inline link: .link's block layout would break a heading or a cell. */
+.inline-link {
+  color: var(--live);
+  text-underline-offset: 3px;
+}
+
+.inline-link:hover {
+  color: var(--live-hover);
+}
+
+/* Confirm dialog: one raised card over a dimmed console. */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgb(15 21 25 / 0.8);
+}
+
+.dialog {
+  width: min(100%, 26rem);
+  padding: var(--space-5) var(--space-4);
+  background: var(--console-raised);
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+}
+
+.dialog-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.dialog-body {
+  margin-top: var(--space-2);
+  color: var(--paper-dim);
+  font-size: var(--text-sm);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
 }
 
 @media (min-width: 720px) {
