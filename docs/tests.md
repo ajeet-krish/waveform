@@ -1,6 +1,53 @@
 # Waveform Test Results
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
+
+## 2026-10-15 - Phase 1: Test Inventory (Tester agent)
+
+Phase 1 shipped the local-first client in four sub-phases (1a data core, 1b bootstrap and logger,
+1c schema v2 and activities, 1d import and storage resilience). This section records the suites
+and counts; the Phase 0 and rebrand entries below are kept for history, and their totals
+(66/15 and 78/19) are now superseded.
+
+### Totals
+
+| Suite | Files | Tests | Notes |
+|-------|-------|-------|-------|
+| Web (`apps/web`) | 36 | 315 | vitest over the db core and lib view models |
+| Scoring (`packages/scoring`) | 4 | 42 | Brzycki, climbing, effort, and the golden fence |
+| Scoring fence (Rust) | 1 | 6 | `crates/scoring/tests/golden.rs`, part of the Rust workspace total |
+| Rust workspace | - | 84 | unit plus integration across the four crates |
+
+The scoring golden fence spans both languages: `packages/scoring/golden/scoring.golden.json` is
+consumed by the TS suite (`golden.test.ts`) and by `crates/scoring/tests/golden.rs`. Flipping one
+vector fails both suites, so the two implementations cannot silently diverge.
+
+### Key guarantees fenced by tests
+
+- **Scoring parity**: the shared golden vectors pin e1RM, V-points, total V-points, Effort Points,
+  and daily Effort Points identically in TypeScript and Rust; one edited expected value fails both
+  suites.
+- **Catalog migration parity**: `catalogParity.test.ts` parses `migrations/0002_seed_catalog.sql`
+  and fails on any content or order drift from the 118-row `CATALOG_SEED`.
+- **Outbox atomicity**: `repos.test.ts` commits a draft with one invalid set and asserts every
+  table and the outbox roll back together, with the draft untouched. Repo writes and their ops
+  share one IndexedDB transaction.
+- **Dexie v1 to v2 upgrade**: `schema.test.ts` opens a v1 database, upgrades it, and asserts the
+  data is preserved while the three new stores (`activities`, `body_stats`, `climb_sends`) appear
+  with their indexes.
+- **Import merge idempotence**: `backupImport.test.ts` proves a second identical merge writes
+  nothing and queues no ops.
+- **Import replace atomicity under injected quota**: a quota failure during replace (and merge)
+  leaves every store unchanged; the failure is published once on the storage bus.
+
+### Commands run
+
+```sh
+npx pnpm@10 --filter @waveform/web test
+npx pnpm@10 --filter @waveform/scoring test
+cargo test --workspace
+WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform cargo test --workspace
+```
 
 ## 2026-10-14 - Phase 0: Test Report (Tester agent)
 

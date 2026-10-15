@@ -44,25 +44,26 @@ Local infra:
 ## Project Map
 
 - `apps/api` - Axum binary: routers, extractors, handlers, config, state.
-- `apps/web` - SolidJS + Vite PWA (routes, stores, sync, lib/api). Phase 1.
+- `apps/web` - SolidJS + Vite PWA: routes, the IndexedDB data core (`src/db`), and `src/lib` modules. Phase 1 done.
 - `crates/db` - SQLx pool, migration runner, row models (ts-rs), queries.
 - `crates/scoring` - Brzycki e1RM, Effort Points, V-points (pure, unit-tested).
 - `crates/analytics` - aggregation metrics ported from fitness_control_center.
 - `crates/sync` - outbox apply, last-write-wins, tombstone contract.
 - `packages/api-types` - TypeScript types generated from Rust (committed).
+- `packages/scoring` - TS Brzycki e1RM, V-points, Effort Points; shared golden vectors fence the Rust crate.
 - `packages/ui` - SolidJS components: charts, heatmap grid, body map. Planned.
 - `migrations` - SQLx SQL: `0001_init.sql` (schema), `0002_seed_catalog.sql` (seed).
 - `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml` (API service reference).
-- `legacy` - v1 vanilla-JS PWA, kept only for the phase 1 import wizard.
+- `legacy` - v1 vanilla-JS PWA, kept for the Phase 2 import converter.
 - `docs` - architecture, decision records, research.
 
 ## Status
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, deploy skeleton, auth shell | In Progress |
-| Phase 1 Training core + offline | Workouts, exercises, offline sync, v1 data import | Not started |
-| Phase 2 Activities + body + routines | Cycling, climbing, body stats, routines | Not started |
+| Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, GitHub Pages deploy | Complete |
+| Phase 1 Local-first training core | Workouts, exercises, body stats, climbing, cycling, dashboard, settings and backup (no backend) | Complete |
+| Phase 2 Backend + auth + sync | API deploy, auth, sync push/pull, v1 import converter, routines, remaining activities | Not started |
 | Phase 3 Social | Leaderboards, heatmap, feed, kudos | Not started |
 | Phase 4 Challenges + hardening | Challenges, hardening, backup and restore drill | Not started |
 

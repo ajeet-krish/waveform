@@ -1,19 +1,21 @@
 # Waveform Platform
 
 Offline-first workout, cycling, and climbing tracker for a small friend
-group. Invite-only accounts, a SolidJS PWA, and a Rust API on Postgres.
-The rebuild replaces the v1 vanilla-JS PWA (preserved in `legacy/` for the
-phase 1 import wizard) while keeping its domain conventions: weights in kg,
-lengths in cm, Monday-start weeks, and Brzycki e1RM everywhere.
+group. The Phase 1 app is a SolidJS PWA that runs entirely on-device
+(IndexedDB); a Rust API on Postgres with invite-only accounts and sync
+lands in Phase 2. The rebuild replaces the v1 vanilla-JS PWA (preserved in
+`legacy/` as the Phase 2 import source) while keeping its domain
+conventions: weights in kg, lengths in cm, Monday-start weeks, and Brzycki
+e1RM everywhere.
 
 Design docs are authoritative and live in `docs/` (`architecture.md`,
 `decisions.md`, `research.md`). Do not edit them casually.
 
 ## Phase status
 
-- Phase 0: monorepo, schema + migrations, CI/CD, web deploy to GitHub Pages, local API + Postgres (in progress)
-- Phase 1: training core (workouts, exercises), offline sync, v1 data import (not started)
-- Phase 2: activities (cycling, climbing), body stats, routines (not started)
+- Phase 0: monorepo, schema + migrations, CI/CD, web deploy to GitHub Pages, local API + Postgres (implemented)
+- Phase 1: local-first training core: workouts, exercises, history, body stats, climbing, cycling, dashboard, settings, and backup (implemented)
+- Phase 2: backend + auth + sync push/pull, the v1 import converter, routines, and running/hike/swim (not started)
 - Phase 3: social (boards, heatmap, feed, kudos) (not started)
 - Phase 4: challenges, hardening, backup/restore drill (not started)
 
@@ -22,8 +24,8 @@ Design docs are authoritative and live in `docs/` (`architecture.md`,
 ```
 waveform/
 |- apps/
-|  |- api/            Axum HTTP API (routers, handlers, extractors)
-|  |- web/            SolidJS + Vite PWA (preview screens in phase 0)
+|  |- api/            Axum HTTP API (routers, handlers, extractors); lands in phase 2
+|  |- web/            SolidJS + Vite PWA (local-first data core in src/db)
 |- crates/
 |  |- db/             SQLx pool, migrations runner, row models (ts-rs)
 |  |- analytics/      Aggregation metrics (ports fitness_control_center)
@@ -31,9 +33,10 @@ waveform/
 |  |- sync/           Outbox apply, last-write-wins, tombstone contract
 |- packages/
 |  |- api-types/      TypeScript types generated from Rust (committed)
+|  |- scoring/        @waveform/scoring: TS scoring + shared golden vectors
 |- migrations/        SQLx migrations (schema + catalog seed + hardening)
 |- infra/             docker-compose.yml (Postgres + Mailpit), railway.toml (API ref)
-|- legacy/            v1 PWA, kept only for the phase 1 import wizard
+|- legacy/            v1 PWA, kept only for the phase 2 import converter
 |- docs/              Architecture, decision records, research
 \- .github/workflows/ CI: rust, ts-rs drift, JS workspace, migrations; Pages deploy
 ```
@@ -58,9 +61,10 @@ Mailpit captures dev OTP emails at `http://localhost:8025`.
 
 Hosting: the web app deploys as a static SPA to GitHub Pages at
 https://ajeet-krish.github.io/waveform/. The API and Postgres are deferred:
-Phase 0 stores no data and the app is offline-first, so managed hosting is not
-needed yet. Run both locally with the steps above; a later phase adds a
-free-tier managed Postgres (Neon or Supabase) and web service (Render or Fly).
+Phase 1 runs entirely on local storage, so managed hosting is not needed yet.
+Run both locally with the steps above; Phase 2 adds auth and sync, and a later
+phase adds a free-tier managed Postgres (Neon or Supabase) and web service
+(Render or Fly).
 
 ## Common commands
 
@@ -77,8 +81,10 @@ Rust:
 JavaScript:
 
 - `pnpm build`, `pnpm lint`, `pnpm test` run the Turborepo pipelines.
-- The SolidJS app (`apps/web`) is scaffolded with preview screens; the
-  phase 1 work wires real data and sync to it.
+- The SolidJS app (`apps/web`) runs on the local-first IndexedDB data core
+  (`apps/web/src/db`); syncing to the API is Phase 2.
+- `packages/scoring` ports the Rust scoring formulas and is fenced against
+  `crates/scoring` by shared golden vectors in `packages/scoring/golden/`.
 
 Database:
 
@@ -94,5 +100,5 @@ Database:
 
 `legacy/` holds the original single-file PWA (`index.html`, `app.js`,
 `styles.css`, `sw.js`, `manifest.webmanifest`, `icons/`). It is not served
-anymore. It exists so the phase 1 import wizard can reproduce the v1 JSON
+anymore. It exists so the Phase 2 import converter can reproduce the v1 JSON
 backup schema and map its exercise names onto the global catalog.

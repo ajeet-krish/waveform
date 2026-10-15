@@ -63,6 +63,9 @@ session/OTP glue, integration-tested).
 
 ## 2026-10-13 - Phase 0: Unify e1RM on Brzycki (retire Epley) [RATIFIED 2026-10-14]
 
+**Status (2026-10-15)**: extended, not superseded. `packages/scoring` ports this formula and is
+fenced against `crates/scoring` by shared golden vectors; see the 2026-10-15 scoring-parity ADR.
+
 **Context**: v1 (liftlog) used Epley (`w * (1 + r/30)`); `fitness_control_center` analytics
 uses Brzycki (`w / (1.0278 - 0.0278 * r)`). Two formulas would corrupt PR comparisons once
 analytics is ported.
@@ -189,3 +192,127 @@ backend adds nothing yet.
 **Trade-offs**: Sign-in, sync, and social stay non-functional in the deployed site until the
 backend lands (they are non-functional everywhere today). Accepted: the deployed site is a preview
 shell and local development carries the real work.
+
+## 2026-10-15 - Phase 1: Local-first single-user core, backend deferred to Phase 2 [LOCKED]
+
+**Context**: The phase plan had Phase 1 as the training core plus offline sync plus the v1 data
+import, which bundled a backend dependency (auth, push/pull) into the first user-facing phase and
+delayed every usable surface.
+
+**Decision**: Rescope Phase 1 to a local-first, single-user client on IndexedDB with no backend in
+the path: workouts, exercises and history, the exercise catalog, body stats, climbing, cycling, the
+dashboard, settings, and local backup. Sync push/pull, the v1 import converter, routines, and the
+remaining activity types (running/hike/swim) move to Phase 2.
+
+**Rationale**: The hard Phase 1 risks are client data modeling, offline UX, and scoring parity;
+none of them need a server. Shipping the local core first makes the app real and demoable on
+GitHub Pages while keeping auth plus sync as an isolated Phase 2.
+
+**Trade-offs**: Phase 1 is single-user and single-device, with no leaderboards or cross-device
+data. Accepted: writes are already outbox-shaped, so sync lands as a drain loop rather than a
+rewrite.
+
+## 2026-10-15 - Phase 1: Dexie/IndexedDB local mirror with outbox-shaped writes [LOCKED]
+
+**Context**: Phase 1 needs durable, offline, transactional local storage with no backend, and
+Phase 2 needs sync to be a drop-in rather than a re-model.
+
+**Decision**: Local rows are the SQL row shape minus the server-stamped `applied_at`, stored in
+Dexie (IndexedDB). Every mutation writes its row(s) and appends one outbox op (`op_id`, `entity`,
+`action`, `payload`, `updated_at`, `created_at`) inside the same IndexedDB transaction. Deletes are
+soft tombstones carrying the full row; catalog rows are server-owned and write no ops.
+
+**Rationale**: The outbox is exactly the Phase 2 push payload, and `user_id`/`updated_at`/
+`deleted_at` are already stamped, so sync becomes a drain loop plus a pull merge. Transactional
+co-writes mean a crash can never leave a row without its op or an op without its row.
+
+**Trade-offs**: Local storage is per-browser and evictable (see the storage ADR), and writes carry
+some bookkeeping. Accepted: it is the price of a drop-in sync and crash safety.
+
+## 2026-10-15 - Phase 1: Client scoring parity via shared golden vectors [LOCKED]
+
+**Context**: The client needs e1RM, V-points, and Effort Points without a server call, and a second
+implementation of the formulas risks silent divergence from `crates/scoring`.
+
+**Decision**: Add `packages/scoring` (`@waveform/scoring`), a TypeScript port of `crates/scoring`.
+Fence both with `packages/scoring/golden/scoring.golden.json`, a versioned vector file for e1RM,
+V-points, total V-points, Effort Points, and daily Effort Points. The vitest suite and
+`crates/scoring/tests/golden.rs` run the same file, so changing one expected value fails both.
+
+**Rationale**: A shared, language-neutral vector file turns divergence into a test failure instead
+of a drift bug, and is stricter and cheaper than hand-mirroring unit tests across two languages.
+
+**Trade-offs**: Two implementations of the same math. Accepted: the golden fence keeps them honest,
+and the Rust side stays authoritative for the future server.
+
+## 2026-10-15 - Phase 1: Canonical backup v2 with merge LWW and typed replace [LOCKED]
+
+**Context**: With no server, backup and restore are the only durability story, and Phase 2 sync has
+to reconcile the same data.
+
+**Decision**: `format: "waveform-backup"`, `version: 2` carries raw rows (tombstones included) for
+the profile, the three workout tables, the catalog, activities, body stats, and the device-local
+`climb_sends` histogram. Parse validates the envelope and every row against the repo guards,
+all-or-nothing. Merge writes only strictly newer rows (LWW on parsed instants) and never touches
+existing outbox rows; replace requires a typed confirmation, wipes the data stores, outbox, and
+`sync_meta` (drafts survive), then restores. Every written row queues one op with `updated_at` equal
+to the row's own LWW time and `created_at` at import time; `e1rm_kg` is recomputed.
+
+**Rationale**: One format and one apply path serve both local restore and the later server import.
+LWW on parsed instants makes equal timestamps compare equal whatever their ISO spelling; row-time
+`updated_at` with import-time `created_at` preserves both sync truth and drain order.
+
+**Trade-offs**: A backup is a raw device dump, not a merged cross-device view. Accepted: it is
+exactly what a restore needs, and v1 backups route to the Phase 2 legacy converter.
+
+## 2026-10-15 - Phase 1: Deterministic UUIDv5 catalog identity [LOCKED]
+
+**Context**: The server seeds the catalog with random `gen_random_uuid()` ids. The client needs ids
+that survive a wipe and let the Phase 2 v1 import map legacy exercise names onto catalog rows.
+
+**Decision**: Derive catalog ids client-side with RFC 4122 UUIDv5 over the DNS namespace and
+`lower(name)`, so a name always maps to the same id. `ensureCatalog` seeds the 118-row catalog
+idempotently; `catalogParity.test.ts` parses `0002_seed_catalog.sql` and fails on any content or
+order drift. Server and client id convergence is deferred to the sync phase.
+
+**Rationale**: Deterministic ids make re-seeding and legacy mapping stable without a server call,
+and mirror the SQL `lower(name)` unique key.
+
+**Trade-offs**: Client catalog ids do not match the server's random ids yet, so the Phase 2 sync
+must reconcile them (for example by matching on `lower(name)`). Accepted: catalog rows are
+server-owned and write no ops, so nothing collides before sync lands.
+
+## 2026-10-15 - Phase 1: Local-only climb_sends histogram in Dexie v2 [LOCKED]
+
+**Context**: The climbing UX needs per-grade send counts (the grade picker and V-points), but the
+locked `activities` table stores only `climb_grade`, `climb_grade_value`, and `routes_sent`.
+
+**Decision**: Dexie v2 adds a device-local `climb_sends` store keyed by `activity_id`, holding a
+17-slot count array (V0..V16). It never enters the outbox; the activity repo derives the row's
+summary columns from it, and V-points come from the histogram. The v1 to v2 upgrade is lossless
+because Dexie only adds stores.
+
+**Rationale**: Keeps the server schema unchanged while giving the client the richer input it
+needs, and the derived summary columns mean the synced row stays consistent even if the histogram
+is lost.
+
+**Trade-offs**: The histogram does not sync (it is carried only in the v2 backup file) and can
+diverge per device. Accepted: the summary columns it derives are the synced truth.
+
+## 2026-10-15 - Phase 1: Storage persistence and a guarded write boundary [LOCKED]
+
+**Context**: IndexedDB is evictable when storage is tight and unavailable in some modes (private
+browsing), and the local log is the only copy of the data.
+
+**Decision**: `lib/storage.ts` asks for persistent storage once per `StorageManager` handle, wraps
+every repo write method (`guardRepos`), and on a quota (`QuotaExceededError`) or unavailable
+(`InvalidStateError`/`SecurityError`) failure publishes exactly one `StorageFailure` on a small bus
+while rethrowing unchanged. Writes outside the wrapped repos (the import's whole-transaction apply)
+publish through `reportStorageFailure`. The shell shows a quota alert with a backup export, or a
+blocked screen with a retry.
+
+**Rationale**: One guarded boundary means the app never silently drops a write, and the failure bus
+turns an opaque DOMException into an actionable backup prompt.
+
+**Trade-offs**: Persistence is a request, not a guarantee, and `persist()` may be refused.
+Accepted: the alert plus backup export is the honest fallback.
