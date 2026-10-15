@@ -1,0 +1,27 @@
+# Local development services: Postgres for the API and Mailpit for the
+# invite-only OTP email inbox (Mailpit web UI at http://localhost:8025).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: waveform
+      POSTGRES_PASSWORD: waveform
+      POSTGRES_DB: waveform
+    ports:
+      - "5432:5432"
+    volumes:
+      - waveform-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waveform -d waveform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.31.5
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  waveform-pgdata:

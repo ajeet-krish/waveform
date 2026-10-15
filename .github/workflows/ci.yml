@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  rustsec-audit:
+    name: RustSec advisory audit (warn-only)
+    runs-on: ubuntu-latest
+    # Warn-only for now: the gate tightens once the backlog is cleared.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit Rust dependencies
+        run: cargo audit
+
+  ts-rs-drift:
+    name: ts-rs generated types drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Remove committed types so removals are detected
+        run: rm packages/api-types/src/generated.ts
+      - name: Regenerate TypeScript types
+        run: cargo test export_ts
+      - name: Fail if committed types drifted
+        run: |
+          git diff --exit-code packages/api-types
+          if [ -n "$(git status --porcelain packages/api-types)" ]; then
+            echo "packages/api-types contains untracked or modified generated files"
+            git status --porcelain packages/api-types
+            exit 1
+          fi
+
+  js:
+    name: JS workspace (install, lint, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Audit JS dependencies (warn-only)
+        run: pnpm audit
+        continue-on-error: true
+      - name: Lint
+        run: pnpm -r run lint
+      - name: Test
+        run: pnpm -r run test
+      - name: Build
+        run: pnpm -r run build
+
+  migrations:
+    name: Migrations against ephemeral Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: waveform
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d waveform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/waveform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Apply migrations with the embedded runner
+        run: cargo run -p waveform-api -- migrate
+      - name: Verify schema and catalog seed landed
+        run: |
+          TABLES=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> '_sqlx_migrations'")
+          echo "tables: $TABLES"
+          test "$TABLES" -eq 17
+          EXERCISES=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM exercises WHERE owner_id IS NULL")
+          echo "global exercises: $EXERCISES"
+          test "$EXERCISES" -ge 50
+      - name: Run DB tests (schema + model decode) against Postgres
+        run: cargo test -p waveform-db

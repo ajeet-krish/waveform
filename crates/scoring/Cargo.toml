@@ -1,0 +1,9 @@
+[package]
+name = "waveform-scoring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure scoring functions: Brzycki e1RM, Effort Points, climbing V-points"
+
+[lints]
+workspace = true

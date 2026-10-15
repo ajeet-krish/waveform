@@ -1,0 +1,14 @@
+# JavaScript
+node_modules/
+dist/
+.turbo/
+
+# Rust
+target/
+
+# Environment and logs
+.env
+*.log
+
+# OS
+.DS_Store

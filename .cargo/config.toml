@@ -1,0 +1,5 @@
+[env]
+# ts-rs writes committed TypeScript bindings relative to this directory.
+# The `relative` key anchors the path at the repository root, so every
+# crate exports into the same location (see the export_ts test in crates/db).
+TS_RS_EXPORT_DIR = { value = "packages/api-types/src", relative = true }

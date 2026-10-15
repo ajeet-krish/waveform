@@ -1,0 +1,59 @@
+import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
+import { VitePWA } from "vite-plugin-pwa";
+
+// Base path is env-driven so local dev and tests keep "/" while the GitHub
+// Pages build (see .github/workflows/pages.yml) serves under /waveform/.
+export default defineConfig(() => ({
+  base: process.env.VITE_BASE_PATH ?? "/",
+  plugins: [
+    solid(),
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["favicon.svg", "apple-touch-icon.png"],
+      manifest: {
+        name: "Waveform Training Console",
+        short_name: "Waveform",
+        description:
+          "Training log for lifting, cycling, and climbing with group boards and a daily effort grid.",
+        // Relative values resolve against the manifest URL, so they follow the
+        // Vite base instead of pinning the app to the domain root.
+        id: ".",
+        start_url: ".",
+        scope: ".",
+        display: "standalone",
+        background_color: "#0f1519",
+        theme_color: "#0f1519",
+        categories: ["health", "fitness"],
+        icons: [
+          { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,ico,svg,png,woff2}"],
+        navigateFallback: "index.html",
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: "StaleWhileRevalidate",
+            options: { cacheName: "google-fonts-stylesheets" },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts-webfonts",
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            },
+          },
+        ],
+      },
+    }),
+  ],
+  build: {
+    target: "es2022",
+  },
+}));
