@@ -1,104 +1,146 @@
-# Waveform Platform
+# Waveform: Training Tracker
 
-Offline-first workout, cycling, and climbing tracker for a small friend
-group. The Phase 1 app is a SolidJS PWA that runs entirely on-device
-(IndexedDB); a Rust API on Postgres with invite-only accounts and sync
-lands in Phase 2. The rebuild replaces the v1 vanilla-JS PWA (preserved in
-`legacy/` as the Phase 2 import source) while keeping its domain
-conventions: weights in kg, lengths in cm, Monday-start weeks, and Brzycki
-e1RM everywhere.
+Your training log for lifting, climbing, and cycling, running entirely in your browser.
 
-Design docs are authoritative and live in `docs/` (`architecture.md`,
-`decisions.md`, `research.md`). Do not edit them casually.
+Open it here: https://ajeet-krish.github.io/waveform/
 
-## Phase status
+Waveform keeps every workout, climb, ride, and body reading on your own device.
 
-- Phase 0: monorepo, schema + migrations, CI/CD, web deploy to GitHub Pages, local API + Postgres (implemented)
-- Phase 1: local-first training core: workouts, exercises, history, body stats, climbing, cycling, dashboard, settings, and backup (implemented)
-- Phase 2: backend + auth + sync push/pull, the v1 import converter, routines, and running/hike/swim (not started)
-- Phase 3: social (boards, heatmap, feed, kudos) (not started)
-- Phase 4: challenges, hardening, backup/restore drill (not started)
+## What you can do
 
-## Repository layout
+### Workouts
 
-```
-waveform/
-|- apps/
-|  |- api/            Axum HTTP API (routers, handlers, extractors); lands in phase 2
-|  |- web/            SolidJS + Vite PWA (local-first data core in src/db)
-|- crates/
-|  |- db/             SQLx pool, migrations runner, row models (ts-rs)
-|  |- analytics/      Aggregation metrics (ports fitness_control_center)
-|  |- scoring/        Brzycki e1RM, Effort Points, V-points (pure, tested)
-|  |- sync/           Outbox apply, last-write-wins, tombstone contract
-|- packages/
-|  |- api-types/      TypeScript types generated from Rust (committed)
-|  |- scoring/        @waveform/scoring: TS scoring + shared golden vectors
-|- migrations/        SQLx migrations (schema + catalog seed + hardening)
-|- infra/             docker-compose.yml (Postgres + Mailpit), railway.toml (API ref)
-|- legacy/            v1 PWA, kept only for the phase 2 import converter
-|- docs/              Architecture, decision records, research
-\- .github/workflows/ CI: rust, ts-rs drift, JS workspace, migrations; Pages deploy
-```
+Start a session, add exercises from the catalog or invent your own, and log each set by weight and reps. As you type, Waveform shows a live e1RM estimate so you can see the strength behind the numbers, not just the numbers. A session in progress saves itself as a draft, so a reload or a closed tab will not cost you the work. When you are done, finish the session or discard it.
 
-## Prerequisites
+### Climbing
 
-- Rust stable (`rustup`), with `rustfmt` and `clippy` components
-- Node.js 22+ and pnpm 10 (`corepack enable` then `corepack prepare pnpm@10.14.0 activate`)
-- Docker (for local Postgres and the Mailpit OTP inbox)
+Log a climbing session by picking a date and recording how many problems you sent at each V grade. Waveform turns those sends into V-points, a simple score that rewards harder grades, so a good session adds up to something you can compare over time.
 
-## Quick start
+### Cycling
 
-1. Install JS dependencies: `pnpm install`
-2. Start local services: `docker compose -f infra/docker-compose.yml up -d`
-3. Copy the environment template: `cp .env.example .env`
-4. Apply migrations: `cargo run -p waveform-api -- migrate`
-5. Run the API (serves on port 8080): `cargo run -p waveform-api`
-   (startup migration is opt-in: `.env` sets `RUN_MIGRATIONS=true`)
-6. Check it: `curl http://localhost:8080/healthz`
+Record a ride with distance, elevation, and duration. It is a plain, honest ride log that sits alongside your lifting and climbing in the same history.
 
-Mailpit captures dev OTP emails at `http://localhost:8025`.
+### Body
 
-Hosting: the web app deploys as a static SPA to GitHub Pages at
-https://ajeet-krish.github.io/waveform/. The API and Postgres are deferred:
-Phase 1 runs entirely on local storage, so managed hosting is not needed yet.
-Run both locally with the steps above; Phase 2 adds auth and sync, and a later
-phase adds a free-tier managed Postgres (Neon or Supabase) and web service
-(Render or Fly).
+Track weight, body fat, and tape circumferences such as arms, chest, and waist. You keep one reading per day, and Waveform draws a weight trend so the direction matters more than any single day.
 
-## Common commands
+### Dashboard
 
-Rust:
+Get a week at a glance: how many sessions you completed, how much volume you lifted, and how many days you were active. It is the fast answer to "how did this week go?"
 
-- `cargo build` builds the whole workspace.
-- `cargo test` runs all Rust tests (scoring, analytics, sync, db).
-- `cargo clippy` and `cargo fmt` handle linting and formatting.
-- `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`
-  from the Rust models. Commit the result; CI fails on drift.
-- `cargo test -p waveform-db` runs the schema and model decode tests; it
-  needs a Postgres URL (see the header of `crates/db/tests/schema.rs`).
+### Exercises
 
-JavaScript:
+Browse a catalog of well over a hundred movements, covering the usual lifts and plenty of variations. If something is missing, create a custom exercise and it becomes part of your catalog.
 
-- `pnpm build`, `pnpm lint`, `pnpm test` run the Turborepo pipelines.
-- The SolidJS app (`apps/web`) runs on the local-first IndexedDB data core
-  (`apps/web/src/db`); syncing to the API is Phase 2.
-- `packages/scoring` ports the Rust scoring formulas and is fenced against
-  `crates/scoring` by shared golden vectors in `packages/scoring/golden/`.
+### Backup and settings
 
-Database:
+Set your display name and choose kg or lb for weight and cm or in for lengths. Your data never leaves the device on its own, so Waveform also gives you a JSON backup you can export and later import to bring everything back.
 
-- `migrations/0001_init.sql` is the full schema, `migrations/0002_seed_catalog.sql`
-  seeds the global exercise catalog (v1 names preserved exactly for import),
-  and `migrations/0003_hardening.sql` applies the phase 0 review hardening
-  (float8 measurement columns, sync pull indexes, constraint ranges).
-- Migrations run through the explicit `cargo run -p waveform-api -- migrate`
-  subcommand; `RUN_MIGRATIONS=true` opts into startup migration (default
-  is false so production never runs DDL on boot).
+## Screenshots
 
-## Legacy v1
+These images are placeholders, to be captured from the live app.
 
-`legacy/` holds the original single-file PWA (`index.html`, `app.js`,
-`styles.css`, `sw.js`, `manifest.webmanifest`, `icons/`). It is not served
-anymore. It exists so the Phase 2 import converter can reproduce the v1 JSON
-backup schema and map its exercise names onto the global catalog.
+![Dashboard screen showing the week at a glance](docs/screenshots/dashboard.png)
+
+The dashboard sums up the week: sessions, volume lifted, and active days.
+
+![Workout screen with exercises and sets](docs/screenshots/workout.png)
+
+Logging a workout, with exercises, sets, and the live e1RM reading.
+
+![History screen grouped by weeks](docs/screenshots/history.png)
+
+History is grouped into Monday-start weeks, with a detail view for each session.
+
+![Exercises screen showing the catalog](docs/screenshots/exercises.png)
+
+The exercise catalog, plus any custom movements you have added.
+
+![Climbing screen with V grade counts](docs/screenshots/climbing.png)
+
+Climbing sessions count sends per V grade and total the V-points.
+
+![Cycling screen with a ride entry](docs/screenshots/cycling.png)
+
+A cycling ride, captured with distance, elevation, and duration.
+
+![Body screen showing stats and weight trend](docs/screenshots/body.png)
+
+Body stats with one reading per day and a weight trend over time.
+
+![Profile and settings screen](docs/screenshots/profile.png)
+
+Settings for your name, units, and the JSON backup tools.
+
+## Step by step
+
+### First run
+
+1. Open https://ajeet-krish.github.io/waveform/ in a browser.
+2. Go to settings and set your display name.
+3. Choose your units: kg or lb for weight, cm or in for lengths.
+
+### Log a workout
+
+1. Start a new session.
+2. Add exercises from the catalog, or create a custom one.
+3. Enter each set as weight and reps.
+4. Read the live e1RM, labeled as Brzycki, as you go.
+5. Finish the session, or discard it if it was a mistake.
+
+### Log a climb
+
+1. Pick the date of the session.
+2. Set how many problems you sent at each V grade.
+3. Watch the V-points total update.
+4. Save the session.
+
+### Log a ride
+
+1. Enter the distance.
+2. Add the elevation.
+3. Record the duration.
+4. Save the ride.
+
+### Log a body reading
+
+1. Enter your weight.
+2. Add body fat if you have it.
+3. Fill in any tape circumferences you measured.
+4. Save it. You keep one reading per day, and the weight trend updates.
+
+### Review your history
+
+1. Open history, grouped into Monday-start weeks.
+2. Use the day headings to find a session.
+3. Open a session for the full detail.
+4. Delete it if you need to, with a confirmation first.
+
+### Protect your data
+
+1. Export a JSON backup from settings.
+2. Keep that file somewhere safe.
+3. Import it on another device to restore everything.
+4. Choose merge to add data, or replace behind a typed confirmation.
+
+### Install on your phone
+
+1. Open the site in your phone browser.
+2. Use Add to Home Screen.
+3. Launch it from the icon. It works offline after the first load.
+
+## Good to know
+
+- Your data lives on this device. Export a backup after big weeks so nothing is ever only in one place.
+- There is no account yet, which is also why the app needs no sign-in.
+- Later phases add accounts, cross-device sync, and the group features such as leaderboards, a heatmap, and a feed.
+
+## For developers
+
+Waveform is a monorepo. The frontend is a SolidJS and Vite PWA, and the backend is Rust with Axum, SQLx, and Postgres. JavaScript packages use pnpm and Turbo, and the Rust side uses Cargo.
+
+- `pnpm install`, `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm dev` for the JS workspace.
+- `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt` for the Rust workspace.
+- `cargo test export_ts` regenerates the API types.
+
+See [AGENTS.md](AGENTS.md) for commands and conventions, and the `docs/` folder for depth: [architecture](docs/architecture.md), [decisions](docs/decisions.md), and [tests](docs/tests.md).
