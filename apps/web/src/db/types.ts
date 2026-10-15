@@ -6,7 +6,14 @@
  * day in "YYYY-MM-DD" form. No Date objects are ever stored.
  */
 
-import type { Exercise, ExerciseEntry, SetEntry, WorkoutSession } from "@waveform/api-types";
+import type {
+  Activity,
+  BodyStats,
+  Exercise,
+  ExerciseEntry,
+  SetEntry,
+  WorkoutSession,
+} from "@waveform/api-types";
 
 /**
  * A synced row as it lives locally: identical to the server row minus
@@ -27,7 +34,9 @@ export type OutboxEntity =
   | "exercises"
   | "workout_sessions"
   | "exercise_entries"
-  | "set_entries";
+  | "set_entries"
+  | "activities"
+  | "body_stats";
 
 /** Maps each syncable entity to the local row type it carries. */
 export type OutboxRowMap = {
@@ -35,6 +44,20 @@ export type OutboxRowMap = {
   workout_sessions: LocalRow<WorkoutSession>;
   exercise_entries: LocalRow<ExerciseEntry>;
   set_entries: SetEntryWrite;
+  activities: LocalRow<Activity>;
+  body_stats: LocalRow<BodyStats>;
+};
+
+/**
+ * The per-grade send histogram for one climbing activity. Device-local
+ * only: it never enters the outbox (the server derives V-points from the
+ * activity row's `climb_grade_value` and `routes_sent`). `counts` always
+ * holds MAX_V_GRADE + 1 (17) entries; the index is the integer V grade.
+ */
+export type ClimbSends = {
+  activity_id: string;
+  counts: number[];
+  updated_at: string;
 };
 
 /**

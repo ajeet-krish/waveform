@@ -32,13 +32,23 @@ export async function createDefaultRepos(): Promise<Repos> {
 
 export { createWaveformDb, type WaveformDb } from "./schema";
 export { createRepos, type Repos, type RepoDeps } from "./repos";
+export type { ActivityRepo, BodyStatRepo } from "./repos";
 export { ensureCatalog } from "./seed/ensureCatalog";
 export { CATALOG_SEED } from "./seed/catalog";
 export { catalogSeedId } from "./seed/uuidV5";
 export { createLocalQuery, observeQuery, type LocalQuery } from "./query";
-export { LocalValidationError, SET_RULES } from "./validation";
+export {
+  ACTIVITY_RULES,
+  BODY_RULES,
+  LocalValidationError,
+  SET_RULES,
+  assertValidActivity,
+  assertValidBodyStat,
+} from "./validation";
+export type { ActivityCheck, BodyStatCheck } from "./validation";
 export { buildOutboxOp, createOutboxRepo, type OutboxRepo } from "./outbox";
 export type {
+  ClimbSends,
   LocalProfile,
   LocalRow,
   OutboxAction,

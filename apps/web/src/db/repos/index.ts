@@ -6,6 +6,8 @@
 
 import { createOutboxRepo, type OutboxRepo } from "../outbox";
 import type { WaveformDb } from "../schema";
+import { createActivityRepo, type ActivityRepo } from "./activities";
+import { createBodyRepo, type BodyStatRepo } from "./body";
 import { createDraftRepo, type DraftRepo } from "./drafts";
 import { createExerciseRepo, type ExerciseRepo } from "./exercises";
 import { createProfileRepo, type ProfileRepo } from "./profile";
@@ -13,6 +15,8 @@ import { createWorkoutRepo, type WorkoutRepo } from "./workouts";
 import type { RepoDeps } from "./deps";
 
 export type { RepoDeps } from "./deps";
+export type { ActivityRepo } from "./activities";
+export type { BodyStatRepo } from "./body";
 export type { DraftRepo } from "./drafts";
 export type { ExerciseRepo } from "./exercises";
 export type { ProfileRepo } from "./profile";
@@ -23,6 +27,8 @@ export type Repos = {
   workouts: WorkoutRepo;
   drafts: DraftRepo;
   profile: ProfileRepo;
+  activities: ActivityRepo;
+  body: BodyStatRepo;
   outbox: OutboxRepo;
 };
 
@@ -32,6 +38,8 @@ export function createRepos(db: WaveformDb, deps: RepoDeps): Repos {
     workouts: createWorkoutRepo(db, deps),
     drafts: createDraftRepo(db, deps),
     profile: createProfileRepo(db, deps),
+    activities: createActivityRepo(db, deps),
+    body: createBodyRepo(db, deps),
     outbox: createOutboxRepo(db),
   };
 }

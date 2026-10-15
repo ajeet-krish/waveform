@@ -9,7 +9,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import { SET_RULES } from "../db/validation";
+import { ACTIVITY_RULES, BODY_RULES, SET_RULES } from "../db/validation";
 
 /** idle until the first submit, then saving, saved, or error. */
 export type FormStatus = "idle" | "saving" | "saved" | "error";
@@ -17,11 +17,11 @@ export type FormStatus = "idle" | "saving" | "saved" | "error";
 /** Returns a human-readable problem, or null when the value is acceptable. */
 export type Validator<V> = (value: V) => string | null;
 
-export type FieldSpec<V> = {
+export type FieldSpec<V, W = V> = {
   initial: V;
-  /** Normalizes the value before validation and values(); raw input stays untouched while typing. */
-  clean?(value: V): V;
-  validate(value: V): string | null;
+  /** Normalizes the raw value V into the stored value W before validation and values(); raw input stays untouched while typing. */
+  clean?(value: V): W;
+  validate(value: W): string | null;
 };
 
 export type FieldHandle<V> = {
@@ -116,8 +116,151 @@ export function createWeightField(options: { initial?: number } = {}): FieldSpec
   });
 }
 
-/** Extracts the value type a field spec carries. */
-export type ValueOf<S> = S extends FieldSpec<infer V> ? V : never;
+/**
+ * The raw value an optional-number field carries: the string exactly as
+ * typed (so an in-progress "12." stays untouched while editing), a
+ * pre-parsed number, or null for an empty box.
+ */
+export type OptionalNumberInput = string | number | null;
+
+/**
+ * Maps an optional-number input to its stored value: an empty or
+ * whitespace-only string becomes null (the column is nullable), a
+ * numeric string becomes its number, and a number passes through.
+ */
+function parseOptionalNumber(raw: OptionalNumberInput): number | null {
+  if (raw === null) {
+    return null;
+  }
+  if (typeof raw === "number") {
+    return raw;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  return Number(trimmed);
+}
+
+export type OptionalNumberFieldOptions = {
+  initial?: number | null;
+  integer?: boolean;
+  min?: number;
+  max?: number;
+  /** Reject values at or below min instead of below min (strictly positive). */
+  exclusiveMin?: boolean;
+  validate?: Validator<number>;
+};
+
+/**
+ * The optional-number field builder behind the body and activity forms.
+ * Empty input maps to null and validates cleanly (the columns are all
+ * nullable); a non-empty value must parse to a finite number inside the
+ * given bounds. The bounds mirror the SQL CHECKs via ACTIVITY_RULES and
+ * BODY_RULES, so anything this accepts, the repo guard accepts too.
+ */
+export function createOptionalNumberField(
+  options: OptionalNumberFieldOptions = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return {
+    initial: options.initial ?? null,
+    clean: parseOptionalNumber,
+    validate(value: number | null): string | null {
+      const parsed = value;
+      if (parsed === null) {
+        return null;
+      }
+      if (!Number.isFinite(parsed)) {
+        return "Enter a number.";
+      }
+      if ((options.integer ?? false) && !Number.isInteger(parsed)) {
+        return "Enter a whole number.";
+      }
+      if (options.min !== undefined) {
+        if (options.exclusiveMin ? parsed <= options.min : parsed < options.min) {
+          return options.exclusiveMin
+            ? `Enter more than ${options.min}.`
+            : `Enter ${options.min} or more.`;
+        }
+      }
+      if (options.max !== undefined && parsed > options.max) {
+        return `Enter ${options.max} or less.`;
+      }
+      return options.validate ? options.validate(parsed) : null;
+    },
+  };
+}
+
+/** duration_min validator mirroring ACTIVITY_RULES: whole minutes 0..1440, or empty. */
+export function createDurationField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+    integer: true,
+    min: ACTIVITY_RULES.durationMin,
+    max: ACTIVITY_RULES.durationMax,
+  });
+}
+
+/** distance_km validator: finite, or empty for null. */
+export function createDistanceKmField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+  });
+}
+
+/** elevation_m validator: finite, or empty for null. */
+export function createElevationField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+  });
+}
+
+/**
+ * Body weight_kg validator mirroring BODY_RULES: strictly positive and at
+ * most 1500, or empty for null.
+ */
+export function createBodyWeightField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+    min: BODY_RULES.weightMinKgExclusive,
+    max: BODY_RULES.weightMaxKg,
+    exclusiveMin: true,
+  });
+}
+
+/** bodyfat_pct validator mirroring BODY_RULES: 0..100, or empty for null. */
+export function createBodyFatField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+    min: BODY_RULES.bodyfatMinPct,
+    max: BODY_RULES.bodyfatMaxPct,
+  });
+}
+
+/** Circumference (neck, waist, ...) validator: finite cm, or empty for null. */
+export function createCircumferenceField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  return createOptionalNumberField({
+    initial: options.initial ?? null,
+  });
+}
+
+/** Extracts the stored (cleaned) value type a field spec carries. */
+export type ValueOf<S> = S extends FieldSpec<infer _V, infer W> ? W : never;
+
+/** Extracts the raw input type a field spec carries (what setValue accepts). */
+export type InputOf<S> = S extends FieldSpec<infer V, infer _W> ? V : never;
 
 /** Maps a record of field specs to the matching record of values. */
 export type ValueMap<F> = { [K in keyof F]: ValueOf<F[K]> };
@@ -128,7 +271,7 @@ export type FormSpec<F> = {
 };
 
 export type Form<F> = {
-  fields: { [K in keyof F]: FieldHandle<ValueOf<F[K]>> };
+  fields: { [K in keyof F]: FieldHandle<InputOf<F[K]>> };
   /** Cleaned values, ready to hand to submit or a repo call. */
   values(): ValueMap<F>;
   status: Accessor<FormStatus>;
@@ -214,13 +357,13 @@ export function createForm<F extends object>(spec: FormSpec<F>): Form<F> {
   };
 }
 
-function makeField<V>(fieldSpec: FieldSpec<V>): {
+function makeField<V, W>(fieldSpec: FieldSpec<V, W>): {
   handle: FieldHandle<V>;
-  cleaned: Accessor<V>;
+  cleaned: Accessor<W>;
 } {
   const [value, setValue] = createSignal<V>(fieldSpec.initial);
   const [touched, setTouched] = createSignal(false);
-  const cleaned = (): V => (fieldSpec.clean ? fieldSpec.clean(value()) : value());
+  const cleaned = (): W => (fieldSpec.clean ? fieldSpec.clean(value()) : (value() as unknown as W));
   const handle: FieldHandle<V> = {
     value,
     touched,

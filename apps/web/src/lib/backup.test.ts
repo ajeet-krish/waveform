@@ -87,23 +87,86 @@ async function seedRows(db: WaveformDb): Promise<void> {
     updated_at: STAMP,
     deleted_at: STAMP,
   });
+  await db.activities.bulkPut([
+    {
+      id: "act-1",
+      user_id: "user-1",
+      type: "climbing",
+      local_date: "2026-10-13",
+      started_at: null,
+      duration_min: 90,
+      distance_km: null,
+      elevation_m: null,
+      climb_grade: "V5",
+      climb_grade_value: 5,
+      routes_sent: 3,
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    },
+    {
+      id: "act-2",
+      user_id: "user-1",
+      type: "cycling",
+      local_date: "2026-10-12",
+      started_at: null,
+      duration_min: null,
+      distance_km: 32.5,
+      elevation_m: 410,
+      climb_grade: null,
+      climb_grade_value: null,
+      routes_sent: null,
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: STAMP,
+    },
+  ]);
+  await db.body_stats.put({
+    id: "body-1",
+    user_id: "user-1",
+    local_date: "2026-10-14",
+    weight_kg: 72.5,
+    bodyfat_pct: 15.2,
+    neck_cm: null,
+    shoulders_cm: null,
+    chest_cm: null,
+    bicep_cm: null,
+    waist_cm: 80,
+    hips_cm: null,
+    thigh_cm: null,
+    calf_cm: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  });
+  await db.climb_sends.put({
+    activity_id: "act-1",
+    counts: new Array<number>(17).fill(0).map((_, index) => (index === 5 ? 1 : 0)),
+    updated_at: STAMP,
+  });
 }
 
 describe("collectBackup", () => {
-  it("reads raw rows from every phase 1 store, tombstones included", async () => {
+  it("reads raw rows from every phase 1 and phase 2 store, tombstones included", async () => {
     const db = harness("collect");
     await seedRows(db);
 
     const backup = await collectBackup(db);
     expect(backup.format).toBe("waveform-backup");
-    expect(backup.version).toBe(1);
-    expect(backup.app).toEqual({ name: "waveform", schema_version: 1 });
+    expect(backup.version).toBe(2);
+    expect(backup.app).toEqual({ name: "waveform", schema_version: 2 });
     expect(backup.profile?.display_name).toBe("Ada");
     expect(backup.exercises).toHaveLength(2);
     expect(backup.exercises.some((row) => row.deleted_at !== null)).toBe(true);
     expect(backup.workout_sessions.map((row) => row.id)).toEqual(["sess-1"]);
     expect(backup.exercise_entries.map((row) => row.id)).toEqual(["entry-1"]);
     expect(backup.set_entries.map((row) => row.id)).toEqual(["set-1"]);
+    expect(backup.activities).toHaveLength(2);
+    expect(backup.activities.some((row) => row.deleted_at !== null)).toBe(true);
+    expect(backup.body_stats.map((row) => row.id)).toEqual(["body-1"]);
+    expect(backup.climb_sends.map((row) => row.activity_id)).toEqual(["act-1"]);
     expect(Number.isNaN(Date.parse(backup.exported_at))).toBe(false);
   });
 
@@ -115,6 +178,9 @@ describe("collectBackup", () => {
     expect(backup.workout_sessions).toEqual([]);
     expect(backup.exercise_entries).toEqual([]);
     expect(backup.set_entries).toEqual([]);
+    expect(backup.activities).toEqual([]);
+    expect(backup.body_stats).toEqual([]);
+    expect(backup.climb_sends).toEqual([]);
   });
 });
 
@@ -126,7 +192,7 @@ describe("serializeBackup", () => {
 
     const text = serializeBackup(backup);
     expect(text).toContain('\n  "format": "waveform-backup",');
-    expect(text).toContain('\n    "schema_version": 1');
+    expect(text).toContain('\n    "schema_version": 2');
     expect(text.endsWith("}\n")).toBe(true);
     expect(JSON.parse(text)).toEqual(backup);
   });

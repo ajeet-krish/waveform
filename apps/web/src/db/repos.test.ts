@@ -252,6 +252,83 @@ describe("workouts repo", () => {
     expect(after.map((row) => row.local_date)).toEqual(["2026-10-14", "2026-10-15"]);
   });
 
+  it("listTreesByDateRange covers the inclusive range and nests ordered entries and sets", async () => {
+    const { db, repos } = harness("trees-date-range");
+    const stamp = "2026-10-14T00:00:00.000Z";
+    const session = (id: string, local_date: string) => ({
+      id,
+      user_id: "user-1",
+      local_date,
+      started_at: null,
+      duration_min: null,
+      routine_id: null,
+      notes: null,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at: null,
+    });
+    await db.workout_sessions.bulkPut([
+      session("sess-before", "2026-10-12"),
+      session("sess-1", "2026-10-13"),
+      session("sess-2", "2026-10-14"),
+      session("sess-after", "2026-10-15"),
+    ]);
+    const entry = (
+      id: string,
+      workout_id: string,
+      order_index: number,
+      deleted_at: string | null = null,
+    ) => ({
+      id,
+      workout_id,
+      exercise_id: `exercise-${id}`,
+      order_index,
+      notes: null,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at,
+    });
+    await db.exercise_entries.bulkPut([
+      entry("entry-b", "sess-1", 1),
+      entry("entry-a", "sess-1", 0),
+      entry("entry-dead", "sess-1", 2, stamp),
+    ]);
+    const set = (
+      id: string,
+      exercise_entry_id: string,
+      set_index: number,
+      deleted_at: string | null = null,
+    ) => ({
+      id,
+      exercise_entry_id,
+      set_index,
+      weight_kg: 100,
+      reps: 5,
+      is_warmup: false,
+      e1rm_kg: 112.5,
+      created_at: stamp,
+      updated_at: stamp,
+      deleted_at,
+    });
+    await db.set_entries.bulkPut([
+      set("set-1", "entry-a", 1),
+      set("set-0", "entry-a", 0),
+      set("set-dead", "entry-a", 2, stamp),
+      set("set-x", "entry-b", 0),
+    ]);
+
+    // Both bounds are inclusive; sessions outside the range drop out.
+    const trees = await repos.workouts.listTreesByDateRange("2026-10-13", "2026-10-14");
+    expect(trees.map((tree) => tree.session.id)).toEqual(["sess-1", "sess-2"]);
+    expect(trees.map((tree) => tree.session.local_date)).toEqual(["2026-10-13", "2026-10-14"]);
+
+    // Each tree nests live entries by order_index and live sets by set_index.
+    expect(trees[0]?.entries.map((slot) => slot.entry.id)).toEqual(["entry-a", "entry-b"]);
+    expect(trees[0]?.entries[0]?.sets.map((setRow) => setRow.id)).toEqual(["set-0", "set-1"]);
+    expect(trees[0]?.entries[1]?.sets.map((setRow) => setRow.id)).toEqual(["set-x"]);
+    expect(trees[1]?.entries).toHaveLength(0);
+  });
+
   it("getTree orders entries by order_index and sets by set_index", async () => {
     const { repos } = harness("tree");
     const workout = await repos.workouts.create({ local_date: "2026-10-14" });

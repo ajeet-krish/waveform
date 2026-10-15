@@ -650,6 +650,122 @@ a.discipline:hover {
   margin-top: var(--space-5);
 }
 
+/* Activity and body surfaces: session rows, the grade stepper grid,
+ * the body form's tape group, and the body chart's second series. */
+
+/* One logged ride or climb: panel head, mono summary, quiet actions. */
+.session-summary {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--paper);
+}
+
+/* Grade picker: one stepper cell per V grade, laid out like a topo grid. */
+.grade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.grade-cell {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--console);
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+}
+
+.grade-stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grade-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.grade-step:hover:not(:disabled) {
+  border-color: var(--live);
+  color: var(--live);
+}
+
+.grade-step:disabled {
+  color: var(--paper-faint);
+  cursor: not-allowed;
+}
+
+.grade-input {
+  width: 4rem;
+  min-width: 4rem;
+  padding: 0 var(--space-1);
+  text-align: center;
+}
+
+/* Fieldsets are structural, not card surfaces: strip the UA chrome. */
+.form-fieldset {
+  min-inline-size: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.form-details {
+  margin-bottom: var(--space-4);
+}
+
+.form-details summary {
+  cursor: pointer;
+}
+
+.form-details summary::marker {
+  color: var(--paper-faint);
+}
+
+.form-details[open] > *:not(summary) {
+  margin-top: var(--space-3);
+}
+
+/* Discipline cards: the live 30-day summary under the blurb. */
+.discipline-window {
+  margin-top: var(--space-2);
+  color: var(--paper);
+}
+
+/* Body chart: weight stays live magenta; body fat rides the steady line. */
+.sparkline-line.is-secondary {
+  stroke: var(--steady);
+}
+
+.sparkline-dot.is-secondary {
+  fill: var(--steady);
+}
+
+.spark-swatch {
+  width: 14px;
+  height: 2px;
+  background: var(--live);
+}
+
+.spark-swatch.is-secondary {
+  background: var(--steady);
+}
+
 @media (min-width: 720px) {
   .panel-grid,
   .discipline-grid {

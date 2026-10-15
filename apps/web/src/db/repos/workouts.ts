@@ -124,6 +124,12 @@ export type WorkoutRepo = {
    * first within one day.
    */
   listAllTrees(): Promise<WorkoutTree[]>;
+  /**
+   * Live sessions whose local_date falls in [from, to] (both inclusive),
+   * each with its live entries and sets, in local_date asc then id asc
+   * order.
+   */
+  listTreesByDateRange(from: string, to: string): Promise<WorkoutTree[]>;
   addEntry(input: EntryCreateInput): Promise<EntryMutation>;
   updateEntry(id: string, patch: EntryPatch): Promise<EntryMutation>;
   /** Soft-deletes an entry and its sets; one delete op per row. */
@@ -268,6 +274,15 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
       });
       const trees: WorkoutTree[] = [];
       for (const session of live) {
+        trees.push(await loadTree(db, session));
+      }
+      return trees;
+    },
+
+    async listTreesByDateRange(from: string, to: string): Promise<WorkoutTree[]> {
+      const sessions = await this.listByDateRange(from, to);
+      const trees: WorkoutTree[] = [];
+      for (const session of sessions) {
         trees.push(await loadTree(db, session));
       }
       return trees;
