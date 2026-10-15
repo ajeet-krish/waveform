@@ -5,7 +5,7 @@
 //! weeks.
 
 use chrono::{Datelike, NaiveDate};
-use liftlog_analytics::volume::{week_start, weekly_volume};
+use waveform_analytics::volume::{week_start, weekly_volume};
 
 fn date(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).expect("valid date")

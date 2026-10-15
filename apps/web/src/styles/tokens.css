@@ -1,7 +1,7 @@
 /*
- * LiftLog design tokens: the single source of truth for color, type, and space.
+ * Waveform design tokens: the single source of truth for color, type, and space.
  *
- * The palette is earned from the subject. LiftLog is a training telemetry
+ * The palette is earned from the subject. Waveform is a training telemetry
  * console: a glass-cockpit display for logged effort. The background is the
  * instrument slate of a dark cockpit panel, not a stock near-black. Signals
  * follow instrument convention where hue carries meaning, so each accent has

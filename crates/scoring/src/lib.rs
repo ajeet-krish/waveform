@@ -1,4 +1,4 @@
-//! Pure scoring functions for LiftLog.
+//! Pure scoring functions for Waveform.
 //!
 //! Everything in this crate is deterministic math with no I/O so it can be
 //! unit tested exhaustively and reused from the API, the analytics crate, and

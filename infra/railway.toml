@@ -1,12 +1,12 @@
 # Railway service configuration for the API + Postgres deployment.
-# The web SPA is hosted separately on Cloudflare Pages.
+# The web SPA is hosted separately on GitHub Pages.
 
 [build]
 builder = "nixpacks"
 
 [deploy]
 # Nixpacks builds the Cargo workspace; the API binary lands in target/release.
-startCommand = "./target/release/liftlog-api"
+startCommand = "./target/release/waveform-api"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"

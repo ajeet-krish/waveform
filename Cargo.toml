@@ -8,10 +8,10 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-liftlog-analytics = { path = "crates/analytics" }
-liftlog-db = { path = "crates/db" }
-liftlog-scoring = { path = "crates/scoring" }
-liftlog-sync = { path = "crates/sync" }
+waveform-analytics = { path = "crates/analytics" }
+waveform-db = { path = "crates/db" }
+waveform-scoring = { path = "crates/scoring" }
+waveform-sync = { path = "crates/sync" }
 
 anyhow = "1"
 axum = "0.8"

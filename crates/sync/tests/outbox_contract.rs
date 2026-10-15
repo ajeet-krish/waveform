@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use liftlog_sync::{clamp_client_timestamp, incoming_wins, row_after_cursor, ApplyOutcome};
 use uuid::Uuid;
+use waveform_sync::{clamp_client_timestamp, incoming_wins, row_after_cursor, ApplyOutcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Action {
@@ -507,7 +507,7 @@ fn a_future_skewed_updated_at_cannot_starve_pulls() {
     // The stored LWW timestamp is clamped near the server clock, so it
     // cannot pin a row years ahead of everyone else's writes.
     let ceiling = outbox.server_time - Duration::seconds(1)
-        + Duration::minutes(liftlog_sync::MAX_CLIENT_CLOCK_SKEW_MINUTES);
+        + Duration::minutes(waveform_sync::MAX_CLIENT_CLOCK_SKEW_MINUTES);
     assert_eq!(outbox.rows["row-b"].updated_at, ceiling);
 
     // And a client that had already synced row-a still receives row-b on

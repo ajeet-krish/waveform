@@ -5,7 +5,7 @@
 //! is no sport-grade (VB/V17+, Font scale) normalization in phase 0, so these
 //! tests pin the exponential weighting contract the climbing board relies on.
 
-use liftlog_scoring::{total_v_points, v_points};
+use waveform_scoring::{total_v_points, v_points};
 
 #[test]
 fn v_points_is_two_to_the_power_of_the_grade() {

@@ -1,6 +1,6 @@
-# LiftLog Web (apps/web)
+# Waveform Web (apps/web)
 
-SolidJS + Vite PWA, the training console for the LiftLog platform. Phase 0 is the
+SolidJS + Vite PWA, the training console for the Waveform platform. Phase 0 is the
 application shell: routes, design tokens, PWA wiring, and placeholder states. No
 auth, data fetching, or sync yet.
 
@@ -17,7 +17,7 @@ auth, data fetching, or sync yet.
 - `src/routes/` one file per screen (dashboard, workout, history, activities, body, social, profile, login).
 - `src/components/` shell chrome (command bar, week strip, tab bar) and shared panels.
 - `src/lib/` pure helpers (week math, heat levels, nav model).
-- `src/types/api.ts` re-exports the ts-rs generated types from `@liftlog/api-types`. Rust is the source of truth: edit the Rust structs, run `cargo test export_ts`, never edit `generated.ts` by hand.
+- `src/types/api.ts` re-exports the ts-rs generated types from `@waveform/api-types`. Rust is the source of truth: edit the Rust structs, run `cargo test export_ts`, never edit `generated.ts` by hand.
 - `src/styles/` `tokens.css` (single source of truth for color, type, space), `base.css` (reset, focus, reduced motion), `shell.css` (chrome), `app.css` (page content).
 
 ## Design notes

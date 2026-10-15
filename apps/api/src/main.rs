@@ -1,4 +1,4 @@
-//! LiftLog API entrypoint.
+//! Waveform API entrypoint.
 //!
 //! Loads configuration from the environment, connects the SQLx pool, applies
 //! pending migrations, and serves the router. Pass `migrate` as an argument
@@ -20,12 +20,12 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let config = Config::from_env().context("failed to load configuration")?;
-    let pool = liftlog_db::connect(&config.database_url)
+    let pool = waveform_db::connect(&config.database_url)
         .await
         .context("failed to connect to Postgres")?;
 
     if std::env::args().any(|arg| arg == "migrate") {
-        liftlog_db::run_migrations(&pool)
+        waveform_db::run_migrations(&pool)
             .await
             .context("failed to run migrations")?;
         tracing::info!("migrations applied, exiting");
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if config.run_migrations {
-        liftlog_db::run_migrations(&pool)
+        waveform_db::run_migrations(&pool)
             .await
             .context("failed to run migrations")?;
     }
@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
 /// Structured logging to stdout, filtered by RUST_LOG.
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("liftlog_api=info,sqlx=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("waveform_api=info,sqlx=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 

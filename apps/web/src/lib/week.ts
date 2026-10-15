@@ -1,4 +1,4 @@
-/** Monday-start week math: LiftLog weeks and heatmap columns begin on Monday. */
+/** Monday-start week math: Waveform weeks and heatmap columns begin on Monday. */
 
 export const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"] as const;
 

@@ -1,5 +1,5 @@
 [package]
-name = "liftlog-scoring"
+name = "waveform-scoring"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

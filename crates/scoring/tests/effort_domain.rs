@@ -5,8 +5,8 @@
 //! its boundaries are contract-level behavior: nothing can ever push a day
 //! past 100 EP, and bonuses are individually bounded.
 
-use liftlog_scoring::effort::DAILY_EP_CAP;
-use liftlog_scoring::{
+use waveform_scoring::effort::DAILY_EP_CAP;
+use waveform_scoring::{
     effort_points, effort_points_daily, Discipline, EffortBonuses, SessionEffort,
 };
 

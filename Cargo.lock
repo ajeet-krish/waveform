@@ -808,55 +808,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "liftlog-analytics"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
-]
-
-[[package]]
-name = "liftlog-api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "dotenvy",
- "liftlog-db",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "liftlog-db"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "liftlog-scoring",
- "serde",
- "sqlx",
- "tokio",
- "ts-rs",
- "uuid",
-]
-
-[[package]]
-name = "liftlog-scoring"
-version = "0.1.0"
-
-[[package]]
-name = "liftlog-sync"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "uuid",
-]
-
-[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2037,6 +1988,55 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "waveform-analytics"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+]
+
+[[package]]
+name = "waveform-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dotenvy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "waveform-db",
+]
+
+[[package]]
+name = "waveform-db"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "sqlx",
+ "tokio",
+ "ts-rs",
+ "uuid",
+ "waveform-scoring",
+]
+
+[[package]]
+name = "waveform-scoring"
+version = "0.1.0"
+
+[[package]]
+name = "waveform-sync"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "uuid",
 ]
 
 [[package]]

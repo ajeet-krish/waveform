@@ -5,7 +5,7 @@
 //! guards outside it, and check the monotonicity/linearity properties the
 //! PR-ranking logic relies on.
 
-use liftlog_scoring::e1rm_brzycki;
+use waveform_scoring::e1rm_brzycki;
 
 fn assert_approx(actual: f64, expected: f64, tolerance: f64) {
     assert!(

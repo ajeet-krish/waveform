@@ -16,9 +16,14 @@ import Profile from "./routes/Profile";
 import SocialLayout from "./routes/SocialLayout";
 import Workout from "./routes/Workout";
 
+// Vite's BASE_URL always ends with "/", but the router's base must not: a
+// trailing slash makes every navigation resolve to "//waveform/...". Stripping
+// it leaves "" on the root base, which is exactly the no-base behavior.
+const routerBase = import.meta.env.BASE_URL.replace(/\/+$/, "");
+
 export default function App() {
   return (
-    <Router root={Shell}>
+    <Router root={Shell} base={routerBase}>
       <Route path="/" component={Dashboard} />
       <Route path="/workout" component={Workout} />
       <Route path="/history" component={History} />

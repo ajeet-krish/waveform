@@ -28,7 +28,7 @@ export default function Login() {
       <PageHeader
         path="Account / Sign in"
         title="Sign in"
-        lede="LiftLog is invite only. Enter your email, then type the 6 digit code it sends you."
+        lede="Waveform is invite only. Enter your email, then type the 6 digit code it sends you."
       />
       <div class="auth-card">
         <form aria-label="Request a sign-in code" onSubmit={requestCode} novalidate>

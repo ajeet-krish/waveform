@@ -4,15 +4,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: liftlog
-      POSTGRES_PASSWORD: liftlog
-      POSTGRES_DB: liftlog
+      POSTGRES_USER: waveform
+      POSTGRES_PASSWORD: waveform
+      POSTGRES_DB: waveform
     ports:
       - "5432:5432"
     volumes:
-      - liftlog-pgdata:/var/lib/postgresql/data
+      - waveform-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U liftlog -d liftlog"]
+      test: ["CMD-SHELL", "pg_isready -U waveform -d waveform"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,4 +24,4 @@ services:
       - "8025:8025"
 
 volumes:
-  liftlog-pgdata:
+  waveform-pgdata:

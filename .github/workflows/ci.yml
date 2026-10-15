@@ -93,22 +93,22 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: liftlog
+          POSTGRES_DB: waveform
         ports:
           - "5432:5432"
         options: >-
-          --health-cmd "pg_isready -U postgres -d liftlog"
+          --health-cmd "pg_isready -U postgres -d waveform"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/liftlog
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/waveform
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Apply migrations with the embedded runner
-        run: cargo run -p liftlog-api -- migrate
+        run: cargo run -p waveform-api -- migrate
       - name: Verify schema and catalog seed landed
         run: |
           TABLES=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> '_sqlx_migrations'")
@@ -118,4 +118,4 @@ jobs:
           echo "global exercises: $EXERCISES"
           test "$EXERCISES" -ge 50
       - name: Run DB tests (schema + model decode) against Postgres
-        run: cargo test -p liftlog-db
+        run: cargo test -p waveform-db

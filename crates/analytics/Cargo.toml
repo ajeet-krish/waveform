@@ -1,5 +1,5 @@
 [package]
-name = "liftlog-analytics"
+name = "waveform-analytics"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

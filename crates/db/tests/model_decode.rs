@@ -14,8 +14,8 @@
 //!
 //! ```text
 //! docker compose -f infra/docker-compose.yml up -d postgres
-//! LIFTLOG_TEST_DATABASE_URL=postgres://liftlog:liftlog@localhost:5432/liftlog \
-//!     cargo test -p liftlog-db --test model_decode
+//! WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform \
+//!     cargo test -p waveform-db --test model_decode
 //! ```
 //!
 //! When the env var is missing every test prints a skip notice and returns,
@@ -27,10 +27,10 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use liftlog_db::{Activity, BodyStats, RoutineEntry, SetEntry};
+use waveform_db::{Activity, BodyStats, RoutineEntry, SetEntry};
 
 fn base_url() -> Option<String> {
-    std::env::var("LIFTLOG_TEST_DATABASE_URL")
+    std::env::var("WAVEFORM_TEST_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
         .ok()
         .filter(|url| !url.is_empty())
@@ -51,7 +51,7 @@ struct ScratchDb {
 
 async fn scratch() -> Option<ScratchDb> {
     let base_url = base_url()?;
-    let name = format!("liftlog_test_{}", Uuid::new_v4().simple());
+    let name = format!("waveform_test_{}", Uuid::new_v4().simple());
     let admin = PgPoolOptions::new()
         .max_connections(1)
         .connect(&with_database(&base_url, "postgres"))
@@ -63,7 +63,7 @@ async fn scratch() -> Option<ScratchDb> {
         .expect("create scratch database");
     admin.close().await;
 
-    let pool = liftlog_db::connect(&with_database(&base_url, &name))
+    let pool = waveform_db::connect(&with_database(&base_url, &name))
         .await
         .expect("connect to scratch database");
     Some(ScratchDb {
@@ -96,7 +96,7 @@ macro_rules! skip_without_db {
             Some(db) => db,
             None => {
                 eprintln!(
-                    "SKIPPED: set LIFTLOG_TEST_DATABASE_URL (or DATABASE_URL) to a Postgres \
+                    "SKIPPED: set WAVEFORM_TEST_DATABASE_URL (or DATABASE_URL) to a Postgres \
                      URL with CREATE DATABASE rights to run model decode tests"
                 );
                 return;
@@ -170,7 +170,9 @@ async fn seed_scaffold(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid, Uuid) {
 #[tokio::test]
 async fn float_measurement_models_decode_from_double_precision() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (user_id, exercise_id, _workout_id, entry_id, routine_id) = seed_scaffold(&db.pool).await;
 
     // A working set: the generated e1rm_kg column must decode as f64 too.
@@ -261,7 +263,7 @@ async fn float_measurement_models_decode_from_double_precision() {
     assert_eq!(set.weight_kg, 102.5);
     assert_eq!(set.reps, 5);
     assert!(!set.is_warmup);
-    let expected_e1rm = liftlog_scoring::e1rm_brzycki(102.5, 5);
+    let expected_e1rm = waveform_scoring::e1rm_brzycki(102.5, 5);
     assert!(
         (set.e1rm_kg - expected_e1rm).abs() < 1e-9,
         "generated e1rm_kg {} must match Rust scoring {expected_e1rm}",
@@ -318,7 +320,9 @@ async fn float_measurement_models_decode_from_double_precision() {
 #[tokio::test]
 async fn pull_pages_on_applied_at_with_server_stamps_and_tombstones() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (_user, _exercise, _workout, entry_id, _) = seed_scaffold(&db.pool).await;
 
     // A hostile or skewed client tries to write a future applied_at; the
@@ -457,7 +461,9 @@ async fn pull_pages_on_applied_at_with_server_stamps_and_tombstones() {
 #[tokio::test]
 async fn hardening_constraints_hold_in_sql() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (user_id, exercise_id, workout_id, entry_id, routine_id) = seed_scaffold(&db.pool).await;
 
     // Exercise history survives exercise deletion (FK is RESTRICT).

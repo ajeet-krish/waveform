@@ -1,6 +1,6 @@
 import { For } from "solid-js";
 
-/** The LiftLog mark: a 7 by 5 fragment of the effort grid with today lit magenta. */
+/** The Waveform mark: a 7 by 5 fragment of the effort grid with today lit magenta. */
 const PATTERN = ["......M", "....TGG", "...TGGA", "..TGGAA", ".TGGAAA"];
 
 const CELL = 5;

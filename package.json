@@ -1,8 +1,8 @@
 {
-  "name": "liftlog",
+  "name": "waveform",
   "version": "0.1.0",
   "private": true,
-  "description": "LiftLog Platform monorepo: offline-first lifting, cycling, and climbing tracker.",
+  "description": "Waveform Platform monorepo: offline-first lifting, cycling, and climbing tracker.",
   "packageManager": "pnpm@10.14.0",
   "engines": {
     "node": ">=22"

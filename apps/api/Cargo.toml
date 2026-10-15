@@ -1,19 +1,19 @@
 [package]
-name = "liftlog-api"
+name = "waveform-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LiftLog HTTP API (Axum + SQLx + Postgres)"
+description = "Waveform HTTP API (Axum + SQLx + Postgres)"
 
 [[bin]]
-name = "liftlog-api"
+name = "waveform-api"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
 dotenvy.workspace = true
-liftlog-db.workspace = true
+waveform-db.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

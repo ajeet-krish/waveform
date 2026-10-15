@@ -4,7 +4,7 @@
 //! `0002_seed_catalog.sql`, and `0003_hardening.sql` apply to a fresh
 //! database, that re-running the migrator is idempotent, that the generated
 //! `set_entries.e1rm_kg` column computes Brzycki exactly like
-//! `liftlog-scoring`, and that the CHECK/UNIQUE constraints and tombstone
+//! `waveform-scoring`, and that the CHECK/UNIQUE constraints and tombstone
 //! contract hold in SQL.
 //!
 //! Requirements: a Postgres the test user can `CREATE DATABASE` on, e.g. the
@@ -12,8 +12,8 @@
 //!
 //! ```text
 //! docker compose -f infra/docker-compose.yml up -d postgres
-//! LIFTLOG_TEST_DATABASE_URL=postgres://liftlog:liftlog@localhost:5432/liftlog \
-//!     cargo test -p liftlog-db --test schema
+//! WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform \
+//!     cargo test -p waveform-db --test schema
 //! ```
 //!
 //! When the env var is missing every test prints a skip notice and returns,
@@ -46,7 +46,7 @@ const SYNCED_TABLES: &[&str] = &[
 ];
 
 fn base_url() -> Option<String> {
-    std::env::var("LIFTLOG_TEST_DATABASE_URL")
+    std::env::var("WAVEFORM_TEST_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
         .ok()
 }
@@ -66,7 +66,7 @@ struct ScratchDb {
 
 async fn scratch() -> Option<ScratchDb> {
     let base_url = base_url()?;
-    let name = format!("liftlog_test_{}", Uuid::new_v4().simple());
+    let name = format!("waveform_test_{}", Uuid::new_v4().simple());
     let admin = PgPoolOptions::new()
         .max_connections(1)
         .connect(&with_database(&base_url, "postgres"))
@@ -78,7 +78,7 @@ async fn scratch() -> Option<ScratchDb> {
         .expect("create scratch database");
     admin.close().await;
 
-    let pool = liftlog_db::connect(&with_database(&base_url, &name))
+    let pool = waveform_db::connect(&with_database(&base_url, &name))
         .await
         .expect("connect to scratch database");
     Some(ScratchDb {
@@ -111,7 +111,7 @@ macro_rules! skip_without_db {
             Some(db) => db,
             None => {
                 eprintln!(
-                    "SKIPPED: set LIFTLOG_TEST_DATABASE_URL (or DATABASE_URL) to a Postgres \
+                    "SKIPPED: set WAVEFORM_TEST_DATABASE_URL (or DATABASE_URL) to a Postgres \
                      URL with CREATE DATABASE rights to run schema tests"
                 );
                 return;
@@ -123,7 +123,7 @@ macro_rules! skip_without_db {
 #[tokio::test]
 async fn fresh_database_gets_every_table() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool)
+    waveform_db::run_migrations(&db.pool)
         .await
         .expect("migrations must apply to a fresh database");
 
@@ -157,7 +157,7 @@ async fn fresh_database_gets_every_table() {
 #[tokio::test]
 async fn migrations_are_idempotent_on_rerun() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool)
+    waveform_db::run_migrations(&db.pool)
         .await
         .expect("first run");
 
@@ -171,7 +171,7 @@ async fn migrations_are_idempotent_on_rerun() {
     );
 
     // Second run must succeed and apply nothing.
-    liftlog_db::run_migrations(&db.pool)
+    waveform_db::run_migrations(&db.pool)
         .await
         .expect("second run must be a no-op success");
     let count_after_second: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
@@ -233,7 +233,9 @@ async fn seed_set_scaffold(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
 #[tokio::test]
 async fn global_catalog_names_are_unique_but_custom_exercises_are_not() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
 
     // 0002_seed_catalog.sql seeds global 'Bench Press (Barbell)'; a
     // differently-cased global twin must collide through the partial index
@@ -272,7 +274,9 @@ async fn global_catalog_names_are_unique_but_custom_exercises_are_not() {
 #[tokio::test]
 async fn generated_e1rm_column_matches_rust_scoring() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (_user, _exercise, _workout, entry_id) = seed_set_scaffold(&db.pool).await;
 
     // e1rm_kg is double precision (0003) and stores the full value; 0.01
@@ -310,7 +314,7 @@ async fn generated_e1rm_column_matches_rust_scoring() {
                 .await
                 .expect("select e1rm");
 
-        let rust_value = liftlog_scoring::e1rm_brzycki(weight, reps);
+        let rust_value = waveform_scoring::e1rm_brzycki(weight, reps);
         assert!(
             (stored - rust_value).abs() < tolerance,
             "SQL e1rm {stored} diverges from Rust scoring {rust_value} at {weight} kg x {reps}"
@@ -346,7 +350,9 @@ async fn set_entries_constraints_hold_in_sql() {
     }
 
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (_user, _exercise, _workout, entry_id) = seed_set_scaffold(&db.pool).await;
 
     // CHECK (reps BETWEEN 1 AND 36).
@@ -395,7 +401,9 @@ async fn set_entries_constraints_hold_in_sql() {
 #[tokio::test]
 async fn client_ops_primary_key_dedupes_replayed_ops() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (user_id, ..) = seed_set_scaffold(&db.pool).await;
 
     let op_id = Uuid::new_v4();
@@ -430,7 +438,9 @@ async fn client_ops_primary_key_dedupes_replayed_ops() {
 #[tokio::test]
 async fn deletes_are_soft_tombstones_with_partial_pull_indexes() {
     let db = skip_without_db!();
-    liftlog_db::run_migrations(&db.pool).await.expect("migrate");
+    waveform_db::run_migrations(&db.pool)
+        .await
+        .expect("migrate");
     let (_user, _exercise, _workout, entry_id) = seed_set_scaffold(&db.pool).await;
 
     let set_id = Uuid::new_v4();

@@ -2,20 +2,25 @@ import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import { VitePWA } from "vite-plugin-pwa";
 
-export default defineConfig({
+// Base path is env-driven so local dev and tests keep "/" while the GitHub
+// Pages build (see .github/workflows/pages.yml) serves under /waveform/.
+export default defineConfig(() => ({
+  base: process.env.VITE_BASE_PATH ?? "/",
   plugins: [
     solid(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
-        name: "LiftLog Training Console",
-        short_name: "LiftLog",
+        name: "Waveform Training Console",
+        short_name: "Waveform",
         description:
           "Training log for lifting, cycling, and climbing with group boards and a daily effort grid.",
-        id: "/",
-        start_url: "/",
-        scope: "/",
+        // Relative values resolve against the manifest URL, so they follow the
+        // Vite base instead of pinning the app to the domain root.
+        id: ".",
+        start_url: ".",
+        scope: ".",
         display: "standalone",
         background_color: "#0f1519",
         theme_color: "#0f1519",
@@ -51,4 +56,4 @@ export default defineConfig({
   build: {
     target: "es2022",
   },
-});
+}));

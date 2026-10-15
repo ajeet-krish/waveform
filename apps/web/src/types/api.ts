@@ -14,4 +14,4 @@ export type {
   SetEntry,
   User,
   WorkoutSession,
-} from "@liftlog/api-types";
+} from "@waveform/api-types";

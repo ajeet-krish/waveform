@@ -1,4 +1,4 @@
-//! Database access for LiftLog.
+//! Database access for Waveform.
 //!
 //! Owns the SQLx pool setup, the embedded migration runner (repository-level
 //! `migrations/` directory), and the shared row models. Models derive
@@ -25,7 +25,7 @@ const MAX_CONNECTIONS: u32 = 10;
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connect a pool to `database_url` (for example
-/// `postgres://liftlog:liftlog@localhost:5432/liftlog`).
+/// `postgres://waveform:waveform@localhost:5432/waveform`).
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
         .max_connections(MAX_CONNECTIONS)

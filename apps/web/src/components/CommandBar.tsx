@@ -8,9 +8,9 @@ export default function CommandBar() {
   const location = useLocation();
   return (
     <header class="cmd">
-      <A href="/" class="cmd-brand" aria-label="LiftLog, go to the dashboard">
+      <A href="/" class="cmd-brand" aria-label="Waveform, go to the dashboard">
         <GridMark height={15} />
-        <span class="cmd-wordmark">LiftLog</span>
+        <span class="cmd-wordmark">Waveform</span>
         <span class="cmd-sub">training console</span>
       </A>
       <nav class="cmd-nav" aria-label="Sections">
