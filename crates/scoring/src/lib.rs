@@ -11,5 +11,7 @@ pub mod climbing;
 pub mod effort;
 
 pub use brzycki::e1rm_brzycki;
-pub use climbing::{total_v_points, v_points};
-pub use effort::{effort_points, effort_points_daily, Discipline, EffortBonuses, SessionEffort};
+pub use climbing::{total_v_points, v_points, MAX_V_GRADE};
+pub use effort::{
+    effort_points, effort_points_daily, Discipline, EffortBonuses, SessionEffort, DAILY_EP_CAP,
+};

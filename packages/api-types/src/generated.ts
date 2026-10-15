@@ -15,12 +15,38 @@ climb_grade_value: number | null,
 /**
  * Number of routes sent.
  */
-routes_sent: number | null, notes: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
+routes_sent: number | null, notes: string | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * Discipline of a non-lifting activity.
  */
 export type ActivityType = "cycling" | "climbing" | "running" | "hike" | "swim";
+
+/**
+ * A body measurement entry. Owner-private: never included in feeds or
+ * leaderboards, scoped strictly to the session user.
+ */
+export type BodyStats = { id: string, user_id: string, local_date: string, 
+/**
+ * Weight in kg.
+ */
+weight_kg: number | null, 
+/**
+ * Body fat percentage.
+ */
+bodyfat_pct: number | null, 
+/**
+ * Circumferences in cm.
+ */
+neck_cm: number | null, shoulders_cm: number | null, chest_cm: number | null, bicep_cm: number | null, waist_cm: number | null, hips_cm: number | null, thigh_cm: number | null, calf_cm: number | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * A time-boxed group or global challenge. Scoring lands in phase 4.
@@ -29,7 +55,11 @@ export type Challenge = { id: string, name: string, description: string | null, 
 /**
  * Optional scoping to a group; null means the whole cohort.
  */
-group_id: string | null, created_by: string, created_at: string, updated_at: string, deleted_at: string | null, };
+group_id: string | null, created_by: string, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * An exercise: a global catalog row (`owner_id` null) or a per-user custom
@@ -44,7 +74,11 @@ owner_id: string | null, name: string, muscle_group: string, equipment: string |
 /**
  * One exercise slot inside a workout.
  */
-export type ExerciseEntry = { id: string, workout_id: string, exercise_id: string, order_index: number, notes: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
+export type ExerciseEntry = { id: string, workout_id: string, exercise_id: string, order_index: number, notes: string | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * A private friend group used for challenges and feeds.
@@ -64,17 +98,36 @@ export type GroupRole = "owner" | "member";
 /**
  * A kudos reaction to someone else's workout. One per (workout, user).
  */
-export type Kudos = { id: string, workout_id: string, user_id: string, created_at: string, updated_at: string, deleted_at: string | null, };
+export type Kudos = { id: string, workout_id: string, user_id: string, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
+
+/**
+ * A user as other members see them: the only fields safe for cross-user
+ * surfaces (feed, leaderboard, heatmap, kudos). Never carries email or
+ * GitHub identity.
+ */
+export type PublicUser = { id: string, display_name: string, avatar_url: string | null, };
 
 /**
  * A reusable workout template.
  */
-export type Routine = { id: string, user_id: string, name: string, notes: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
+export type Routine = { id: string, user_id: string, name: string, notes: string | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * One planned exercise slot inside a routine.
  */
-export type RoutineEntry = { id: string, routine_id: string, exercise_id: string, order_index: number, target_sets: number, target_reps: number, target_weight_kg: number | null, created_at: string, updated_at: string, deleted_at: string | null, };
+export type RoutineEntry = { id: string, routine_id: string, exercise_id: string, order_index: number, target_sets: number, target_reps: number, target_weight_kg: number | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * A single set. `e1rm_kg` is a stored generated column (Brzycki) written by
@@ -88,10 +141,15 @@ reps: number, is_warmup: boolean,
 /**
  * Brzycki e1RM, generated and stored by Postgres.
  */
-e1rm_kg: number, created_at: string, updated_at: string, deleted_at: string | null, };
+e1rm_kg: number, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
- * A registered user. Signup is invite-only.
+ * A registered user. Signup is invite-only. Owner-only surface: renders
+ * other users through [`PublicUser`] in feeds, leaderboards, and heatmaps.
  */
 export type User = { id: string, email: string, display_name: string, 
 /**
@@ -110,4 +168,8 @@ local_date: string, started_at: string | null, duration_min: number | null,
 /**
  * Routine this workout was forked from, if any.
  */
-routine_id: string | null, notes: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
+routine_id: string | null, notes: string | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable.
+ */
+applied_at: string, deleted_at: string | null, };

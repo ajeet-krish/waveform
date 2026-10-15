@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js";
 
-export type IconName = "grid" | "dumbbell" | "log" | "body" | "users" | "user";
+export type IconName = "grid" | "dumbbell" | "log" | "catalog" | "body" | "users" | "user";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   grid: () => (
@@ -19,6 +19,14 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   log: () => (
     <>
       <path d="M4 6h16M4 12h16M4 18h10" />
+    </>
+  ),
+  catalog: () => (
+    <>
+      <circle cx="5.5" cy="7" r="1.2" />
+      <circle cx="5.5" cy="12" r="1.2" />
+      <circle cx="5.5" cy="17" r="1.2" />
+      <path d="M10 7h9M10 12h9M10 17h9" />
     </>
   ),
   body: () => (

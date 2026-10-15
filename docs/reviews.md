@@ -1,0 +1,124 @@
+# LiftLog Reviews
+
+Last updated: 2026-10-14
+
+## 2026-10-14 - Phase 0: Foundation review (full-stack)
+
+Verdict: PASS WITH ISSUES
+
+Scope: apps/api, crates/{db,scoring,analytics,sync}, migrations/0001 and 0002, apps/web,
+packages/api-types, CI, infra, root tooling, docs consistency. Review basis: static analysis
+against docs/architecture.md and docs/decisions.md. No code was modified.
+
+### Findings
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| High | crates/db/src/models.rs:153,158,189,190,194,212-223,252 | SQLx cannot decode Postgres NUMERIC into Rust f64 (sqlx 0.8.6 type compatibility covers FLOAT8 only, see sqlx-postgres types/float.rs). Every model with a numeric column (SetEntry, Activity, BodyStats, RoutineEntry) will fail at runtime with "mismatched types" on first query. Phase 1 is blocked on this and no CI job exercises it. | Either add the rust_decimal or bigdecimal sqlx feature and use that type, or change the columns to double precision, or add `#[sqlx(try_from = "BigDecimal")]` wrappers. |
+| High | crates/sync/src/lib.rs:14-16,39-41; migrations/0001_init.sql:259-261 | Pull cursor `updated_at > cursor` over client-supplied timestamps is unsafe as specified: (1) one device with a future-skewed clock writes one row and every subsequent pull is starved until that wall-clock time passes; (2) rows sharing a timestamp across a page boundary are silently skipped by a strictly-greater cursor; (3) JS Date truncates to milliseconds while timestamptz stores microseconds, so ties are common. | Make the cursor server-authoritative (a server `applied_at` sequence), page on (updated_at, id) composite, and clamp or reject client updated_at values more than a few minutes in the future. Document the rule in the sync contract. |
+| Medium | migrations/0001_init.sql:136,150,172,195,219,232,104,120 | The partial `updated_at` indexes (`WHERE deleted_at IS NULL`) cannot serve sync-pull queries, which must return tombstones so clients learn about deletes. They also lack `user_id`, so per-user pulls scan globally and filter. Architecture.md claims these indexes serve sync-pull. | Add per-entity `(user_id, updated_at)` indexes that include tombstones, or a dedicated sync index per table. Keep the partial indexes for live-row reads if useful. |
+| Medium | migrations/0001_init.sql:221-229 | `kudos` UNIQUE (workout_id, user_id) conflicts with the tombstone contract: a soft-deleted kudos still occupies the unique slot, so un-kudos followed by re-kudos (new client-generated id) violates the constraint and the push fails. | Make the unique index partial (`WHERE deleted_at IS NULL`) or specify resurrect semantics (upsert on (workout_id, user_id), undelete the tombstone) in the sync contract. |
+| Medium | migrations/0001_init.sql:160-165 | `e1rm_kg numeric(6,2)` overflows for plausible mistyped data (for example weight_kg 300.00 at 36 reps computes 11111, exceeding 9999.99). The generated column computes before CHECK validation, so a bad row aborts with an opaque numeric-overflow error instead of a clean constraint violation. | Bound `weight_kg` with a realistic upper CHECK (for example <= 1500) and widen e1rm_kg to numeric(7,2). |
+| Medium | migrations/0001_init.sql:160-165 vs crates/scoring/src/brzycki.rs:19-29 | DB rounds e1rm to 2 decimals (numeric(6,2)); Rust returns full f64. The "keep the two in sync" claim holds for the formula but not for the value. Phase 1 PR detection comparing Rust-computed to DB-stored e1RM will disagree at the 0.01 level. | Document the rounding boundary (DB is authoritative, compare with 0.01 tolerance) or round in the Rust helper. |
+| Medium | crates/db/src/lib.rs:56-71; crates/db/src/models.rs:205-227 | `BodyStats` derives TS but is missing from the `export_ts` list and therefore absent from packages/api-types/src/generated.ts. The Body product surface has no generated type. | Add `BodyStats::export()` to the export loop and regenerate. |
+| Medium | apps/web/src/routes/Body.tsx:22-27 vs migrations/0001_init.sql:199-216 | Body UI shows "Height ... cm" and the lede says "Weight, height, and body fat", but `body_stats` has no height column and the BodyStats model has none either. | Decide now: add `height_cm` in an append-only migration (0003) or drop Height from the UI copy. |
+| Medium | migrations/0001_init.sql:138-147 | `exercise_entries.exercise_id` references `exercises` ON DELETE CASCADE, so a hard delete of a custom exercise destroys workout history (entries and, transitively, set_entries). History must outlive exercise catalog rows. | Use ON DELETE RESTRICT (or SET NULL with a snapshot of the name) and rely on the deleted_at soft-delete discipline for catalog rows. |
+| Medium | crates/sync/src/lib.rs:7-9 | Idempotency is specified only as "replay of a stored op_id is a no-op". Two gaps: (1) the dedupe check must verify the op row belongs to the pushing user, otherwise a replayed foreign op_id silently suppresses a victim's op (first writer wins); (2) the row upsert and the client_ops insert must commit in one transaction or a crash between them makes the op unreplayable. | Specify: reject (409) on op_id collision with a different user_id, and apply each op atomically with its client_ops row. |
+| Medium | apps/web/src/lib/nav.ts:10-25; apps/web/src/App.tsx:21-36 | The documented 4-tab mental model (Workout, History, Exercises, Body) survives the rebuild, but there is no Exercises route or nav entry anywhere in the route tree. | Add an /exercises route stub and an Exercises entry in SECTIONS (and TABS if the 4-tab model is literal). |
+| Medium | docs/architecture.md:120-121 | Session-cookie auth across unrelated origins (Cloudflare Pages SPA plus Railway API) means cross-site cookies, which Safari blocks (including inside iOS home-screen PWAs). The auth design as written will fail on iOS unless a custom domain makes app and API share an eTLD+1 (same-site cookies) or tokens move to an Authorization header. | Decide the domain layout before Phase 1 auth lands; document it in a new ADR. |
+| Medium | migrations/0001_init.sql:14 | `users.email` UNIQUE is case-sensitive; Foo@x.com and foo@x.com become distinct accounts and OTP lookups keyed by exact string behave differently per casing. | Replace with `CREATE UNIQUE INDEX ... ON users (lower(email))`. |
+| Low | crates/db/src/models.rs:32-63 | Session, OtpCode, and Invite derive Serialize while holding `token_hash` / `code_hash`; a handler that serializes these rows directly would leak hashes in responses. | Add `#[serde(skip_serializing)]` on the hash fields or use dedicated response DTOs. |
+| Low | migrations/0001_init.sql:127,180-187,204 | No CHECK bounds on duration_min (>= 0), bodyfat_pct (0..100), climb_grade_value, routes_sent (>= 0); only reps and weight_kg are constrained. | Add range CHECKs in a later append-only migration as handlers land. |
+| Low | crates/scoring/src/climbing.rs:9-15 | `v_points` accepts negative grades (fractional points) and very large grades (infinity) with no validation; schema allows climb_grade_value to 999.9. | Validate or clamp grade to the documented 0..=16 V-scale at the API boundary. |
+| Low | README.md:22-38,70-71 | README says "The SolidJS app (apps/web) arrives in phase 1" and its layout block omits apps/web, both stale for Phase 0. | Refresh README to match the repo. |
+| Low | .github/workflows/ci.yml:36-40 | ts-rs regeneration merges into the existing generated.ts, so decls for types later removed from Rust linger forever and the drift check stays green. | `rm packages/api-types/src/generated.ts` before `cargo test export_ts` in the drift job. |
+| Low | apps/web/src/components/WeekStrip.tsx:10; apps/web/src/routes/Heatmap.tsx:41 | `new Date()` is captured once per render; a long-lived session does not roll over at midnight or across week boundaries. | Drive "today" from a signal refreshed on visibilitychange or a midnight timer. |
+| Low | apps/web/src/routes/Login.tsx:37-74 | One form with two submit buttons; when Phase 1 wires handlers, Enter-key submits resolve to the first button and `SubmitEvent.submitter` must disambiguate. | Split into two forms or branch on `event.submitter`. |
+| Low | apps/web/src/routes/Profile.tsx:35 | "Sessions survive reinstalls on the home screen app" is unverified; iOS typically wipes home-screen app storage on removal (cookies may survive; IndexedDB mirror will not). | Verify the claim before shipping or soften the copy. |
+| Low | infra/docker-compose.yml:21 | `axllent/mailpit:latest` is unpinned; a floating tag can break dev environments. | Pin a version tag. |
+| Low | crates/sync/Cargo.toml:9 | `serde` is an unused dependency in liftlog-sync (and lint-level "unused" will not catch it). | Drop it or use it when op payloads get typed. |
+| Low | packages/api-types/package.json:12 | The "test" script is `tsc --noEmit`, identical to lint; it asserts nothing new. | Acceptable placeholder; replace with real tests or drop the script when the pipeline needs it. |
+| Low | migrations/0001_init.sql:253-263 | `client_ops` grows forever; replay dedupe history has no retention policy. | Prune processed ops older than the maximum offline window (for example 30 days) in a scheduled job. |
+| Low | apps/web/src/components/TabBar.tsx:11 | Active nav links use only a class; screen readers get no current-page indication. | Add `aria-current="page"` on the active link. |
+| Low | crates/db/src/lib.rs:39-41 | `run_migrations` is documented safe on every startup, but concurrent multi-instance startup can race in sqlx's migration lock; fine for a single Railway instance. | Note the single-instance assumption in the doc comment. |
+
+### Checks
+
+| Check | Verdict | Notes |
+|-------|---------|-------|
+| Brzycki formula: SQL generated column vs Rust vs docs | PASS | `w / (1.0278 - 0.0278*r)` identical in migrations/0001_init.sql:160-165 and crates/scoring/src/brzycki.rs:19-29; reps <= 1 branch equals the formula at r=1 exactly under numeric arithmetic. |
+| Reps bounds and division guards | PASS (note) | CHECK (reps BETWEEN 1 AND 36) keeps the denominator >= 0.0270; Rust adds a defensive non-positive-denominator fallback the SQL lacks, but out-of-range reps cannot exist. |
+| Schema constraints vs crates/db models | FAIL | Field names and shapes match, but NUMERIC-to-f64 decoding is unsupported (High above) and BodyStats is not exported. |
+| Claimed invariants (kg/cm, Monday weeks, Brzycki only, client UUID PKs) | PASS | Verified in schema, models, volume.rs:21-24, week.ts:34-39, and seed; Epley survives only in docs history and legacy/. |
+| Migrations correctness and discipline | PASS WITH ISSUES | 17 tables matches the CI assertion; seed is idempotent (ON CONFLICT on the partial unique index, 118 rows >= the CI floor of 50); append-only so far. Index and FK issues above. |
+| Sync contract internal consistency | FAIL | LWW, tombstone, and idempotency pieces are individually sound but the pull cursor semantics and the kudos unique constraint are not implementable safely as written. |
+| Frontend route tree vs product surfaces | PASS WITH ISSUES | Covers dashboard, workout, history, activities (cycling, climbing), body, social (leaderboard, heatmap, feed), profile, login; missing Exercises (and later routines, challenges). |
+| Design tokens vs hardcoded values | PASS | Hex values only in tokens.css; manifest and index.html hardcode theme color, which is expected for static config. |
+| Accessibility basics | PASS | Skip link (Shell.tsx:11), :focus-visible (base.css:54), prefers-reduced-motion (base.css:138-146), semantic header/nav/main/section/ol, aria labels, keyboard-scrollable heatmap. |
+| PWA config | PASS | vite.config.ts manifest is coherent (separate maskable icon, id/scope/start_url, workbox precache plus font caching); registerSW({ immediate: true }) with autoUpdate. |
+| CI gates and passability | PASS | fmt, clippy -D warnings, cargo test, ts-rs drift (git diff plus untracked check), pnpm frozen lockfile lint/test/build, and migrations against ephemeral Postgres are wired correctly; TS_RS_EXPORT_DIR resolves via .cargo/config.toml as ts-rs documents. Build artifacts on disk indicate the pipelines ran clean locally. |
+| Conventions (em dashes, Rust style) | PASS | No em dashes or stray double hyphens in new prose (legacy/ excepted); 4-space K&R, snake_case/PascalCase/SCREAMING_SNAKE consistent. |
+| Docs consistency (architecture, decisions, AGENTS) | PASS WITH ISSUES | Code faithfully implements the ADRs (Brzycki, EP caps, V-points, shared ranks copy); README drift and the Body height copy mismatch above. |
+
+### Recurring patterns for other agents
+
+- Numeric columns are mapped to Rust f64 everywhere; resolve the sqlx type mapping once (0003 migration or model attributes) before Phase 1 writes any query.
+- Anything the sync layer reads by `updated_at` must include tombstones and a user scope; do not reuse the partial live-row indexes for pull queries.
+- Client-supplied timestamps need a trust boundary (clamping or server clocks) before they drive cursors or LWW.
+- UI copy is currently the de facto spec in several places (Body height, session survival); treat copy changes as schema-affecting decisions.
+
+## 2026-10-14 - Security Review - Phase 0
+
+Verdict: PASS WITH ISSUES
+
+Scope: apps/api (main.rs, config.rs, state.rs, routes/*), crates/{db,scoring,analytics,sync},
+migrations/0001 and 0002, apps/web session/login placeholders and PWA config,
+.github/workflows/ci.yml, infra/, .env.example, root configs. Design-level review of the auth and
+privacy model in docs/architecture.md and docs/decisions.md against commit d433fbc. Handlers are
+stubs, so findings target the DESIGN and the foundation. No code was modified.
+
+### Findings
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| High | docs/architecture.md:96-97,120-121 | The auth model places a SameSite=Lax session cookie across two registrable domains (Cloudflare Pages SPA, Railway API). Cross-site fetch calls never carry a Lax cookie, and Safari (including iOS home-screen PWAs) blocks cross-site cookies even at SameSite=None. As specified the auth cannot work on iOS, and the tempting fix (SameSite=None + CORS credentials) widens the CSRF surface without fixing iOS. | Put app and API under one eTLD+1 via a custom domain (app.example.com + api.example.com), keep the cookie Secure, HttpOnly, SameSite=Lax, Path=/, add the __Host- prefix, and keep the X-Requested-With check and exact-origin CORS as defense in depth. Record the decision in an ADR before Phase 1 auth lands. |
+| Medium | crates/db/src/models.rs:32-63 | Session, OtpCode, and Invite derive Serialize while holding token_hash / code_hash. Any handler that serializes these rows directly leaks hashes. For invites this is worse than leakage: sha256 of a short invite code is offline-crackable, and a cracked code forges access to the invite-only system. | Add #[serde(skip_serializing)] to every hash field (or dedicated response DTOs), and either hash invite codes with Argon2id like OTP codes or make invite codes 128+ bits of CSPRNG output where sha256 is acceptable. |
+| Medium | migrations/0001_init.sql:34-57; docs/architecture.md:97 | Auth schema gaps versus the stated model: (1) no rate-limit state anywhere although OTP flow promises rate limiting; (2) otp_codes allows unlimited live codes per email and no DB-enforced attempt cap (attempts must be incremented atomically via UPDATE ... RETURNING or concurrent verifies defeat the 10^6 search space); (3) invites single-use is unenforced (used_by IS NULL must be checked in the UPDATE WHERE clause inside a transaction), expires_at is nullable (immortal invites), and the email column is optional and unbound to the account it creates; (4) GitHub OAuth state and PKCE storage is undesigned. | One live OTP per email (partial unique index or supersede semantics), CHECK (attempts <= 5), atomic attempt increments, NOT NULL invite expires_at, atomic single-use redemption, enforce invite.email (case-insensitive) on the created account when set, store rate-limit counters (per email and per IP) or an equivalent limiter, and carry OAuth state in a short-lived signed cookie. |
+| Medium | crates/sync/src/lib.rs:7-9; migrations/0001_init.sql:253-263 | Sync idempotency as specced is exploitable in two ways: a replayed foreign op_id is a silent no-op success, so anyone who learns a victim op_id can pre-claim it and suppress the victim op (first writer wins); and nothing states that apply must force row user_id from the session, so a payload-supplied user_id could write rows into another account (workout poisoning, body_stats injection). Also the row upsert and client_ops insert must commit atomically. | Return 409 when an op_id exists for a different user_id, overwrite or reject any user_id in payloads (session user wins), apply each op and its client_ops row in one transaction, and cap ops per push batch. |
+| Medium | docs/architecture.md:105; legacy/ | POST /import/liftlog accepts arbitrary JSON with no specified defenses: no body size cap, no schema or range validation, and "idempotent per legacy id" is a global key, so one account's import can suppress another's if the same legacy backup is imported twice. | Set an explicit axum body limit for the import route (streaming cap above the JSON CRUD default), strict DTOs with range checks (weights, reps, dates), per-user namespacing of legacy ids (user_id, legacy_id), per-user rate limits, and one transactional all-or-nothing import. |
+| Medium | .github/workflows/ci.yml:1-97 | No supply-chain vulnerability gates: cargo audit / cargo deny and pnpm audit are not run anywhere. The planned backup workflow (docs/architecture.md:59) will hold live database credentials and does not exist yet, so its secrets handling is undecided. | Add a rustsec audit job (cargo deny check advisories or rustsec/audit-check) and a pnpm audit step (warn-only at first), add workflow-level permissions: contents: read, and define secrets handling for the backup workflow (GitHub Environments secrets, no echo, masked logs). |
+| Medium | apps/api/src/config.rs:31-34; infra/railway.toml:7-13 | RUN_MIGRATIONS defaults to true, so every production boot runs DDL with the API's database role. A future SQLi or RCE then escalates to schema control, and the app role must hold migration rights it should not need. | Default to false in production, run migrations as an explicit release step (cargo run -p liftlog-api migrate) under a separate role, and give the serving role DML-only grants. |
+| Low | crates/db/src/models.rs:17-29 | User derives Serialize and TS with email and github_id. Social surfaces (feed, leaderboard) must not echo other users' email addresses. | Introduce a PublicUser DTO (id, display_name, avatar_url) for anything rendered to other users; keep the full row owner-only. |
+| Low | .github/workflows/ci.yml:17-21,52-55; infra/docker-compose.yml:21 | GitHub Actions are tag-pinned (mutable) and axllent/mailpit:latest floats; a compromised tag or upstream image can execute in CI. | Pin actions to commit SHAs and pin Mailpit to a version tag. Dev-only impact, but CI runs on every PR. |
+| Low | crates/db/src/lib.rs:29-35; apps/api/src/config.rs:25 | connect() never requires TLS; a DATABASE_URL without sslmode=require silently sends traffic plaintext if Postgres is reached off the Railway internal network. | Validate or document sslmode=require for every non-internal connection string. |
+| Low | apps/web/index.html:16-20; apps/web/vite.config.ts:32-47 | No Content-Security-Policy or security headers for the PWA, and Google Fonts are loaded third-party (CSS injection surface plus privacy). | Add a _headers file for Cloudflare Pages (CSP with connect-src limited to the API origin, frame-ancestors none), and self-host the fonts. |
+| Low | migrations/0001_init.sql:23-32 | sessions has no expires_at cleanup index and no explicit revocation or rotation semantics; token entropy and constant-time verify rules are undocumented. | Index (expires_at) for the cleanup job, specify logout = row delete and rotation on login and OAuth link, require >= 128-bit CSPRNG session tokens, and require argon2::verify (constant time) for OTP checks. |
+| Info | crates/db/tests/schema.rs:74-100 | SQL built with format! for CREATE / DROP DATABASE; names are internally generated UUIDs so there is no injection path. Keep this pattern out of application code. | None; acceptable in tests only. |
+| Info | apps/api/src/routes/mod.rs:35-49 | healthz returns a generic body and logs DB errors server-side only. Good pattern, keep it as handlers land. | None. |
+
+### Check Results
+
+| Check | Verdict | Notes |
+|-------|---------|-------|
+| 1. Auth model as specified (schema design) | FAIL | Hashing and TTL bones are right (Argon2id OTP, sha256 session token, consumed_at, expires_at) but rate-limit state, atomic attempt caps, atomic single-use invites, invite email binding, and OAuth state are missing or unenforced. See Medium rows 3. |
+| 2. Session/cookie security and CSRF model | FAIL | Cross-site SameSite=Lax cannot work as specified (High row 1). Assessment of fixes: custom domain + SameSite=Lax is the only option that is both secure and works on iOS. SameSite=None + CORS credentials works only in non-Safari browsers, keeps the whole CSRF surface open permanently, and any CORS misconfiguration (wildcard with credentials, reflected Origin) becomes full account takeover. The X-Requested-With custom-header CSRF model is sound as one layer (HTML forms cannot set it; cross-origin JS setting it forces a preflight that a strict allowlist rejects) but must not be the sole control: pair it with Origin / Sec-Fetch-Site validation on state-changing requests and forbid state-changing GETs. |
+| 3. SQL injection / query safety | PASS | Application SQL is static and parameterized (routes/mod.rs:36 uses a literal, migrations are static files); no raw string SQL with external input anywhere. Mandate query! or .bind() and identifier whitelisting for future dynamic ORDER BY / LIMIT. |
+| 4. Sensitive-data exposure | FAIL | Hash-bearing models derive Serialize (Medium row 2); User exports email (Low row 8). body_stats authorization is not enforced anywhere yet because no handler exists; Phase 1 must enforce owner-only in every repository query (WHERE user_id = session user), never emit body_stats in feed, leaderboard, heatmap, or cross-user sync pull, and grant no admin bypass even if an admin role appears later (schema has none today). Cross-tenant negative tests are promised in docs/architecture.md:98-99 and must land with the first body_stats handler. |
+| 5. Secrets / config | PASS | No hardcoded secrets or keys; .env is gitignored; .env.example holds dev-only defaults; CI uses ephemeral service credentials; railway.toml holds no secrets. Residual Low notes on TLS and workflow permissions above. |
+| 6. Input validation and limits (import, sync push) | FAIL | Not yet specified in the design; the idempotency contract as written has the foreign op_id suppression flaw and no payload user_id rule (Medium rows 4-5). axum 0.8 defaults to a 2 MB body limit, which is implicit rather than deliberate. |
+| 7. Dependency / supply-chain posture | FAIL | No cargo audit, cargo deny, or pnpm audit in CI (Medium row 6); tag-pinned actions and floating mailpit tag (Low row 9). Mitigating: Cargo.lock and pnpm-lock.yaml are committed, pnpm install uses --frozen-lockfile, and the toolchain file and pnpm version are pinned. |
+| 8. MIGRATOR / run_migrations gating | PASS | The migrate path is CLI and env gated and is not exposed over HTTP (no route serves it); the embedded Migrator is checksum-tracked at compile time. Residual Low: RUN_MIGRATIONS defaults on in production and the serving role is implicitly DDL-capable (Medium row 7 covers hardening). |
+
+### Verification Checklist
+
+- [x] No Critical findings
+- [ ] No High findings (1: cross-site cookie design)
+- [x] All Medium findings have mitigations (6 rows, each with a concrete fix)
+- [x] Low findings documented (5 rows)
+- [x] Phase security integrates with prior phases (findings mapped onto the foundation review above; items 17, 18, 26, 30 from that review re-confirmed from a security angle)
+
+### Recurring patterns for other agents
+
+- The auth design decisions (domain layout, cookie flags, invite code hashing) must be locked in an ADR before any Phase 1 auth handler is written; every finding in rows 1 to 3 is cheaper to fix now than after handlers exist.
+- Serialization of database rows straight into responses is the standing leak risk: hash fields and PII need skip attributes or DTOs before the first handler lands (rows 2 and 8).
+- Any client-supplied identifier (op_id, legacy import id, user_id in payloads) needs an ownership rule before it is trusted (rows 4 and 5).

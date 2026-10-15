@@ -15,7 +15,10 @@ pub struct Config {
     pub host: String,
     /// TCP port to bind. Railway injects `PORT`; defaults to 8080 locally.
     pub port: u16,
-    /// Whether to apply pending migrations during startup.
+    /// Whether to apply pending migrations during startup. Defaults to
+    /// false so production never runs DDL on boot; deploys apply
+    /// migrations as an explicit release step via the API's `migrate`
+    /// subcommand. Local development can opt in with `RUN_MIGRATIONS=true`.
     pub run_migrations: bool,
 }
 
@@ -29,8 +32,8 @@ impl Config {
             .parse::<u16>()
             .context("PORT must be a valid u16")?;
         let run_migrations = match std::env::var("RUN_MIGRATIONS") {
-            Ok(value) => !(value == "0" || value.eq_ignore_ascii_case("false")),
-            Err(_) => true,
+            Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
+            Err(_) => false,
         };
         Ok(Self {
             database_url,

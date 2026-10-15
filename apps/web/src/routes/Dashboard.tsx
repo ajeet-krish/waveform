@@ -2,10 +2,12 @@ import { A } from "@solidjs/router";
 import PageHeader from "../components/PageHeader";
 import Panel from "../components/Panel";
 import { HEAT_LEVEL_RANGES } from "../lib/heat";
+import { createToday } from "../lib/today";
 
 export default function Dashboard() {
+  const today = createToday();
   const todayLabel = () =>
-    new Date().toLocaleDateString(undefined, {
+    today().toLocaleDateString(undefined, {
       weekday: "long",
       day: "numeric",
       month: "long",

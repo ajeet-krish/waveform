@@ -1,24 +1,24 @@
 import { For } from "solid-js";
+import { createToday } from "../lib/today";
 import { DAY_LETTERS, DAY_NAMES, isoWeek, weekDays } from "../lib/week";
 
 /**
  * The signature element: the current week as seven day cells, Monday first,
  * with today ringed in live magenta. It echoes the heatmap at chrome scale so
- * consistency stays visible on every screen.
+ * consistency stays visible on every screen. "Today" is a live signal, so a
+ * long-open session rolls over at midnight without a reload.
  */
 export default function WeekStrip() {
-  const today = new Date();
-  const days = weekDays(today);
-  const week = isoWeek(today);
+  const today = createToday();
 
   return (
     <section class="wk" aria-label="This week">
       <div class="wk-heading">
         <span class="label">This week</span>
-        <span class="wk-weeknum num">W{week}</span>
+        <span class="wk-weeknum num">W{isoWeek(today())}</span>
       </div>
       <ol class="wk-days">
-        <For each={days}>
+        <For each={weekDays(today())}>
           {(day, index) => (
             <li
               class="wk-cell"

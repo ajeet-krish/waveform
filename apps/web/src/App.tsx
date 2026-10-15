@@ -5,6 +5,7 @@ import Body from "./routes/Body";
 import Climbing from "./routes/Climbing";
 import Cycling from "./routes/Cycling";
 import Dashboard from "./routes/Dashboard";
+import Exercises from "./routes/Exercises";
 import Feed from "./routes/Feed";
 import Heatmap from "./routes/Heatmap";
 import History from "./routes/History";
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/" component={Dashboard} />
       <Route path="/workout" component={Workout} />
       <Route path="/history" component={History} />
+      <Route path="/exercises" component={Exercises} />
       <Route path="/activities" component={Activities} />
       <Route path="/activities/cycling" component={Cycling} />
       <Route path="/activities/climbing" component={Climbing} />

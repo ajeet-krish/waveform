@@ -34,8 +34,12 @@ pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
-/// Apply all pending migrations. Safe to call on every startup; sqlx tracks
-/// applied versions in the `_sqlx_migrations` table.
+/// Apply all pending migrations. sqlx tracks applied versions in the
+/// `_sqlx_migrations` table, so repeat calls are no-ops. Assumes a single
+/// instance runs migrations at a time (one Railway service, one CI job):
+/// concurrent multi-instance startups can race inside sqlx's migration
+/// lock. Production should prefer the explicit `migrate` subcommand over
+/// startup migration (`RUN_MIGRATIONS` defaults to false).
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
     MIGRATOR.run(pool).await
 }
@@ -43,8 +47,8 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateE
 #[cfg(test)]
 mod export_tests {
     use crate::{
-        Activity, ActivityType, Challenge, Exercise, ExerciseEntry, Group, GroupMember, GroupRole,
-        Kudos, Routine, RoutineEntry, SetEntry, User, WorkoutSession,
+        Activity, ActivityType, BodyStats, Challenge, Exercise, ExerciseEntry, Group, GroupMember,
+        GroupRole, Kudos, PublicUser, Routine, RoutineEntry, SetEntry, User, WorkoutSession,
     };
     use ts_rs::TS;
 
@@ -56,6 +60,7 @@ mod export_tests {
         for result in [
             Activity::export(),
             ActivityType::export(),
+            BodyStats::export(),
             Challenge::export(),
             Exercise::export(),
             ExerciseEntry::export(),
@@ -63,6 +68,7 @@ mod export_tests {
             GroupMember::export(),
             GroupRole::export(),
             Kudos::export(),
+            PublicUser::export(),
             Routine::export(),
             RoutineEntry::export(),
             SetEntry::export(),

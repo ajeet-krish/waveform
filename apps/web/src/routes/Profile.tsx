@@ -32,7 +32,7 @@ export default function Profile() {
         <Panel label="Session">
           <EmptyState
             title="You are not signed in"
-            body="Sign in with a one-time code sent to your email, or with GitHub. Sessions survive reinstalls on the home screen app."
+            body="Sign in with a one-time code sent to your email, or with GitHub. Sessions live on this device: removing the home screen app usually wipes them, so plan on a fresh code after a reinstall."
             actions={[{ label: "Go to sign in", href: "/login" }]}
             note="Weights are stored in kg and lengths in cm; lb and in are display only"
           />

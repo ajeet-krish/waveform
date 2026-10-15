@@ -13,7 +13,7 @@ Backend, Cargo workspace:
 - `cargo clippy --workspace --all-targets -- -D warnings` lints; warnings fail.
 - `cargo fmt --check` verifies formatting.
 - `cargo run -p liftlog-api -- migrate` applies migrations and exits.
-- `cargo run -p liftlog-api` serves the API on port 8080 and applies pending migrations on startup.
+- `cargo run -p liftlog-api` serves the API on port 8080; migration on startup is opt-in (`RUN_MIGRATIONS=true`, default false).
 - `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`; commit it, CI fails on drift.
 
 Frontend, pnpm workspace (`apps/web`, `packages/*`):

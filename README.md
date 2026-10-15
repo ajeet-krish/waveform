@@ -23,6 +23,7 @@ Design docs are authoritative and live in `docs/` (`architecture.md`,
 liftlog/
 |- apps/
 |  |- api/            Axum HTTP API (routers, handlers, extractors)
+|  |- web/            SolidJS + Vite PWA (preview screens in phase 0)
 |- crates/
 |  |- db/             SQLx pool, migrations runner, row models (ts-rs)
 |  |- analytics/      Aggregation metrics (ports fitness_control_center)
@@ -30,7 +31,7 @@ liftlog/
 |  |- sync/           Outbox apply, last-write-wins, tombstone contract
 |- packages/
 |  |- api-types/      TypeScript types generated from Rust (committed)
-|- migrations/        SQLx migrations (schema + catalog seed)
+|- migrations/        SQLx migrations (schema + catalog seed + hardening)
 |- infra/             docker-compose.yml (Postgres + Mailpit), railway.toml
 |- legacy/            v1 PWA, kept only for the phase 1 import wizard
 |- docs/              Architecture, decision records, research
@@ -48,9 +49,10 @@ liftlog/
 1. Install JS dependencies: `pnpm install`
 2. Start local services: `docker compose -f infra/docker-compose.yml up -d`
 3. Copy the environment template: `cp .env.example .env`
-4. Run the API (applies migrations on startup, serves on port 8080):
-   `cargo run -p liftlog-api`
-5. Check it: `curl http://localhost:8080/healthz`
+4. Apply migrations: `cargo run -p liftlog-api -- migrate`
+5. Run the API (serves on port 8080): `cargo run -p liftlog-api`
+   (startup migration is opt-in: `.env` sets `RUN_MIGRATIONS=true`)
+6. Check it: `curl http://localhost:8080/healthz`
 
 Mailpit captures dev OTP emails at `http://localhost:8025`.
 
@@ -59,22 +61,28 @@ Mailpit captures dev OTP emails at `http://localhost:8025`.
 Rust:
 
 - `cargo build` builds the whole workspace.
-- `cargo test` runs all Rust tests (scoring, analytics, sync).
+- `cargo test` runs all Rust tests (scoring, analytics, sync, db).
 - `cargo clippy` and `cargo fmt` handle linting and formatting.
 - `cargo test export_ts` regenerates `packages/api-types/src/generated.ts`
   from the Rust models. Commit the result; CI fails on drift.
+- `cargo test -p liftlog-db` runs the schema and model decode tests; it
+  needs a Postgres URL (see the header of `crates/db/tests/schema.rs`).
 
 JavaScript:
 
 - `pnpm build`, `pnpm lint`, `pnpm test` run the Turborepo pipelines.
-- The SolidJS app (`apps/web`) arrives in phase 1; the JS workspace is
-  scaffolded now with `packages/api-types`.
+- The SolidJS app (`apps/web`) is scaffolded with preview screens; the
+  phase 1 work wires real data and sync to it.
 
 Database:
 
-- `migrations/0001_init.sql` is the full schema; `migrations/0002_seed_catalog.sql`
-  seeds the global exercise catalog (v1 names preserved exactly for import).
-- `cargo run -p liftlog-api` re-runs pending migrations automatically.
+- `migrations/0001_init.sql` is the full schema, `migrations/0002_seed_catalog.sql`
+  seeds the global exercise catalog (v1 names preserved exactly for import),
+  and `migrations/0003_hardening.sql` applies the phase 0 review hardening
+  (float8 measurement columns, sync pull indexes, constraint ranges).
+- Migrations run through the explicit `cargo run -p liftlog-api -- migrate`
+  subcommand; `RUN_MIGRATIONS=true` opts into startup migration (default
+  is false so production never runs DDL on boot).
 
 ## Legacy v1
 

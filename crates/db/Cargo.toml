@@ -12,5 +12,9 @@ sqlx.workspace = true
 ts-rs.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+liftlog-scoring.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true

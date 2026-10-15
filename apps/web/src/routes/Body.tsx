@@ -8,7 +8,7 @@ export default function Body() {
       <PageHeader
         path="Metrics / Body"
         title="Body"
-        lede="Weight, height, and body fat over time. Only you see these numbers: they never appear on boards, feeds, or challenges."
+        lede="Weight and body fat over time. Only you see these numbers: they never appear on boards, feeds, or challenges."
       />
       <div class="panel-grid">
         <Panel label="Latest reading">
@@ -17,12 +17,6 @@ export default function Body() {
               <dt class="label">Weight</dt>
               <dd class="stat-value">
                 0 <span class="stat-unit">kg</span>
-              </dd>
-            </div>
-            <div class="stat">
-              <dt class="label">Height</dt>
-              <dd class="stat-value">
-                0 <span class="stat-unit">cm</span>
               </dd>
             </div>
             <div class="stat">
@@ -42,7 +36,7 @@ export default function Body() {
         </Panel>
       </div>
       <p class="panel-note mt-4">
-        Weights are stored in kg and lengths in cm. lb and in are display conversions only.
+        Weights are stored in kg; lb is a display conversion only.
       </p>
     </div>
   );

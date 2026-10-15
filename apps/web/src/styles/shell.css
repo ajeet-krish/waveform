@@ -219,6 +219,7 @@
 .tab {
   display: flex;
   flex: 1;
+  min-width: 0;
   min-height: var(--tabbar-height);
   flex-direction: column;
   align-items: center;
@@ -233,8 +234,19 @@
   text-transform: uppercase;
 }
 
+.tab span {
+  white-space: nowrap;
+}
+
 .tab.is-active {
   color: var(--live);
+}
+
+/* Six tabs only fit a 320px phone with tighter letter spacing. */
+@media (max-width: 359px) {
+  .tab {
+    letter-spacing: 0.04em;
+  }
 }
 
 /* Page header */

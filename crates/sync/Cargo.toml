@@ -7,7 +7,7 @@ description = "Offline-first sync: outbox apply, last-write-wins, tombstones"
 
 [dependencies]
 chrono.workspace = true
-serde.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

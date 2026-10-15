@@ -836,8 +836,10 @@ name = "liftlog-db"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "liftlog-scoring",
  "serde",
  "sqlx",
+ "tokio",
  "ts-rs",
  "uuid",
 ]
@@ -851,7 +853,7 @@ name = "liftlog-sync"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "serde",
+ "uuid",
 ]
 
 [[package]]

@@ -22,7 +22,8 @@ function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function sameDay(a: Date, b: Date): boolean {
+/** True when two dates fall on the same calendar day. */
+export function sameDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&

@@ -2,10 +2,13 @@
 //!
 //! Conventions (docs/architecture.md): client-generated UUID primary keys so
 //! offline creates never collide; `updated_at` plus a `deleted_at` tombstone
-//! on every synced row; weights in kg and lengths in cm internally; Monday
-//! weeks and device-local `local_date` for grouping. Server-internal rows
-//! (sessions, OTP codes, invites) are serialized for the API but not
-//! exported to TypeScript.
+//! on every synced row, and a server-stamped `applied_at` that drives the
+//! sync pull cursor (migrations/0003_hardening.sql); weights in kg and
+//! lengths in cm internally; Monday weeks and device-local `local_date` for
+//! grouping. Server-internal rows (sessions, OTP codes, invites) are
+//! deliberately not serializable so token and code hashes can never leak
+//! into a JSON response; the API returns dedicated DTOs such as
+//! [`PublicUser`] for anything another user may see.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,7 +16,8 @@ use sqlx::FromRow;
 use ts_rs::TS;
 use uuid::Uuid;
 
-/// A registered user. Signup is invite-only.
+/// A registered user. Signup is invite-only. Owner-only surface: renders
+/// other users through [`PublicUser`] in feeds, leaderboards, and heatmaps.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
 #[ts(export_to = "generated.ts")]
 pub struct User {
@@ -28,8 +32,20 @@ pub struct User {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+/// A user as other members see them: the only fields safe for cross-user
+/// surfaces (feed, leaderboard, heatmap, kudos). Never carries email or
+/// GitHub identity.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct PublicUser {
+    pub id: Uuid,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+}
+
 /// An opaque server-side session. Only the sha256 token hash is stored.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Not serializable: a dedicated response DTO never exposes the hash.
+#[derive(Debug, Clone, FromRow)]
 pub struct Session {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -38,8 +54,8 @@ pub struct Session {
     pub expires_at: DateTime<Utc>,
 }
 
-/// A hashed email OTP with attempt limiting.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// A hashed email OTP with attempt limiting. Not serializable.
+#[derive(Debug, Clone, FromRow)]
 pub struct OtpCode {
     pub id: Uuid,
     pub email: String,
@@ -50,15 +66,18 @@ pub struct OtpCode {
     pub created_at: DateTime<Utc>,
 }
 
-/// A single-use invite code. There is no public signup.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// A single-use invite code. There is no public signup. Redemption is
+/// atomic (`UPDATE ... WHERE used_by IS NULL`, migrations/0003) and a set
+/// `email` binds the account it may create. Not serializable: sha256 of a
+/// short code must never reach a response body.
+#[derive(Debug, Clone, FromRow)]
 pub struct Invite {
     pub id: Uuid,
     pub code_hash: String,
     pub email: Option<String>,
     pub created_by: Uuid,
     pub used_by: Option<Uuid>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -125,6 +144,8 @@ pub struct WorkoutSession {
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -139,6 +160,8 @@ pub struct ExerciseEntry {
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -158,6 +181,8 @@ pub struct SetEntry {
     pub e1rm_kg: f64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -197,6 +222,8 @@ pub struct Activity {
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -223,6 +250,8 @@ pub struct BodyStats {
     pub calf_cm: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -236,6 +265,8 @@ pub struct Routine {
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -252,6 +283,8 @@ pub struct RoutineEntry {
     pub target_weight_kg: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -264,6 +297,8 @@ pub struct Kudos {
     pub user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -281,5 +316,7 @@ pub struct Challenge {
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable.
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }

@@ -1,6 +1,7 @@
-import { For } from "solid-js";
+import { createMemo, For } from "solid-js";
 import EmptyState from "../components/EmptyState";
 import { HEAT_LEVEL_RANGES } from "../lib/heat";
+import { createToday } from "../lib/today";
 import { startOfWeekMonday } from "../lib/week";
 
 const WEEK_COLUMNS = 53;
@@ -38,16 +39,27 @@ function weeksBack(today: Date, back: number): Date[] {
 const isAfter = (date: Date, today: Date) => date.getTime() > today.getTime();
 
 export default function Heatmap() {
-  const today = new Date();
+  const today = createToday();
   const columns = Array.from({ length: WEEK_COLUMNS }, (_, back) => WEEK_COLUMNS - 1 - back);
 
-  let lastMonth = -1;
-  const monthLabels = columns.map((back) => {
-    const monday = weeksBack(today, back)[0] as Date;
-    const month = monday.getMonth();
-    const label = month !== lastMonth ? (MONTHS[month] ?? "") : "";
-    lastMonth = month;
-    return label;
+  /** Day cells per week column, recomputed when the signal date rolls over. */
+  const weeks = createMemo(() => {
+    const now = today();
+    return columns.map((back) =>
+      weeksBack(now, back).map((date) => ({ future: isAfter(date, now) })),
+    );
+  });
+
+  const monthLabels = createMemo(() => {
+    const now = today();
+    let lastMonth = -1;
+    return columns.map((back) => {
+      const monday = weeksBack(now, back)[0] as Date;
+      const month = monday.getMonth();
+      const label = month !== lastMonth ? (MONTHS[month] ?? "") : "";
+      lastMonth = month;
+      return label;
+    });
   });
 
   return (
@@ -69,24 +81,21 @@ export default function Heatmap() {
               aria-label="Effort grid: 53 weeks of training days. Nothing logged yet."
             >
               <div class="heat-months" aria-hidden="true">
-                <For each={monthLabels}>{(label) => <span>{label}</span>}</For>
+                <For each={monthLabels()}>{(label) => <span>{label}</span>}</For>
               </div>
               <div class="heat-grid">
-                <For each={columns}>
-                  {(back) => {
-                    const dates = weeksBack(today, back);
-                    return (
-                      <For each={WEEKDAY_ROWS}>
-                        {(row) => (
-                          <span
-                            class="heat-cell"
-                            classList={{ "is-future": isAfter(dates[row] as Date, today) }}
-                            data-level={0}
-                          />
-                        )}
-                      </For>
-                    );
-                  }}
+                <For each={weeks()}>
+                  {(cells) => (
+                    <For each={WEEKDAY_ROWS}>
+                      {(row) => (
+                        <span
+                          class="heat-cell"
+                          classList={{ "is-future": cells[row]?.future ?? false }}
+                          data-level={0}
+                        />
+                      )}
+                    </For>
+                  )}
                 </For>
               </div>
             </div>
