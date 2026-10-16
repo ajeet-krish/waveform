@@ -795,3 +795,18 @@ found every one of the 3b Low fixes landed.
 - The "timeout" failure kind is dead code until something aborts: every new network client needs a real AbortController timeout for the retry and backoff machinery to mean anything.
 - Device-level ownership state (`adopted_user_id`, row owner stamps) must be checked against the SIGNING-IN user, not merely against presence, whenever destructive or re-owning flows run; "first sign-in" is not "first user on this device".
 - Wire-contract mismatches surface as quarantine noise, not errors: when one side of a contract (the server's catalog Forbidden here) has a defined answer, the other side (import op queuing, drain handling) must implement its half in the same change, or the queue fills with terminally rejected ops.
+
+### Owner clarification (2026-10-16)
+
+The product owner confirmed that a device may be shared or handed down, so more than one account may
+sign in on the same device over its lifetime. This elevates two findings above from Low to
+**Medium, fix before multi-device sync widens**:
+
+- Finding 3 (shared-device adoption leak): `needsAdoption` keys only on the signed-in user id, so a
+  second account is offered the previous account's log with "Upload my existing local data" as the
+  default, which re-owns every row (including owner-private `body_stats`) into the new account, and
+  "Start empty" destroys the prior account's local copy. Must detect a foreign local owner and
+  refuse the upload path.
+- Finding 5 (repos compare owner to null only): a repo bound to one user can mutate another user's
+  rows in the same IndexedDB, reachable through sign-out on a shared device. Guards must compare
+  against `deps.userId`.
