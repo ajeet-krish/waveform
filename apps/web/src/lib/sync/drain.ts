@@ -6,7 +6,12 @@
  * duplicate, and discarded_stale are acknowledged (removed), rejected
  * ops are recorded through markOutboxFailed (quarantine at 3), and
  * retryable ops stay queued but are skipped for the rest of this drain
- * so the loop always makes progress. Deferred ids (retryable or never
+ * so the loop always makes progress. A rejected op is attempted at most
+ * once per drain, so its three-failure quarantine is reached across
+ * separate drains rather than three times in one. A rejection of a
+ * server-owned catalog (exercise) row is a clean drop instead: the op is
+ * acknowledged and removed with no failure recorded, because the server
+ * already owns that row. Deferred ids (retryable, rejected, or never
  * answered) are excluded from the later batches' query, so the loop
  * walks past them and still attempts the rest of the queue. Results are
  * keyed by op_id, so a partial response is safe: an op the server never
@@ -22,6 +27,7 @@
 
 import { RULE_CONSTANTS, type OpResult, type PushOp, type PushResponse } from "@waveform/api-types";
 import { createOutboxRepo, markOutboxFailed } from "../../db/outbox";
+import { isServerOwnedRow } from "../../db/serverOwned";
 import type { WaveformDb } from "../../db/schema";
 import type { OutboxOp } from "../../db/types";
 import { ApiError } from "../api";
@@ -44,7 +50,11 @@ export type DrainOptions = {
 export type DrainResult = {
   /** Ops sent to the server across all batches of this drain. */
   pushed: number;
-  /** Ops removed from the outbox after an acked status. */
+  /**
+   * Ops removed from the outbox: acked statuses (applied, duplicate,
+   * discarded_stale) plus server-owned catalog rejections clean-dropped
+   * without a recorded failure.
+   */
   acked: number;
   /** Ops recorded through markOutboxFailed after a rejected status. */
   rejected: number;
@@ -136,8 +146,16 @@ export async function drainOutbox(options: DrainOptions): Promise<DrainResult> {
           acked.push(op.op_id);
           break;
         case "rejected":
-          await markOutboxFailed(db, op.op_id, outcome.error);
-          result.rejected += 1;
+          // A server-owned catalog row was rejected (the server already
+          // owns it): clean-drop it. Every other rejection records one
+          // failed attempt and is deferred so this drain tries it once.
+          if (isServerOwnedRow(op.entity, op.payload)) {
+            acked.push(op.op_id);
+          } else {
+            await markOutboxFailed(db, op.op_id, outcome.error);
+            result.rejected += 1;
+            deferred.add(op.op_id);
+          }
           break;
         case "retryable":
           deferred.add(op.op_id);

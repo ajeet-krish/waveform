@@ -3,7 +3,10 @@
  *
  * Transactional contract: every mutating function performs all of its row
  * writes AND all of its outbox appends inside ONE
- * `db.transaction("rw", <touched tables>, db.outbox, ...)`. Deletes are
+ * `db.transaction("rw", <touched tables>, db.outbox, ...)`. Ownership
+ * guard: a mutation refuses to touch a session, entry, or set whose
+ * owning session's `user_id` is not `deps.userId`, throwing before any
+ * write. Deletes are
  * soft: the row is re-put with `deleted_at = updated_at = now` and the
  * delete op carries the full tombstoned row. Set writes compute a local
  * `e1rm_kg` copy (Postgres regenerates its own) but their outbox payloads
@@ -109,6 +112,55 @@ async function loadTree(db: WaveformDb, session: LocalRow<WorkoutSession>): Prom
   return { session, entries };
 }
 
+/** The foreign-owner refusal for one row kind, with a noun-specific message. */
+function foreignAccountError(noun: string, id: string): LocalValidationError {
+  return new LocalValidationError(
+    `this ${noun} belongs to another account`,
+    [`${noun} ${id} is owned by another account`],
+  );
+}
+
+/** Refuses a mutation when the session's user_id is not the signed-in user. */
+function assertSessionOwned(deps: RepoDeps, session: LocalRow<WorkoutSession>): void {
+  if (session.user_id !== deps.userId) {
+    throw foreignAccountError("workout", session.id);
+  }
+}
+
+/** Refuses a mutation when the entry's owning session belongs to another user. */
+async function assertEntryOwned(
+  db: WaveformDb,
+  deps: RepoDeps,
+  entry: LocalRow<ExerciseEntry>,
+): Promise<void> {
+  const session = await db.workout_sessions.get(entry.workout_id);
+  if (!session) {
+    throw new LocalValidationError(`workout not found: ${entry.workout_id}`);
+  }
+  if (session.user_id !== deps.userId) {
+    throw foreignAccountError("entry", entry.id);
+  }
+}
+
+/** Refuses a mutation when the set's owning session belongs to another user. */
+async function assertSetOwned(
+  db: WaveformDb,
+  deps: RepoDeps,
+  set: LocalRow<SetEntry>,
+): Promise<void> {
+  const entry = await db.exercise_entries.get(set.exercise_entry_id);
+  if (!entry) {
+    throw new LocalValidationError(`exercise entry not found: ${set.exercise_entry_id}`);
+  }
+  const session = await db.workout_sessions.get(entry.workout_id);
+  if (!session) {
+    throw new LocalValidationError(`workout not found: ${entry.workout_id}`);
+  }
+  if (session.user_id !== deps.userId) {
+    throw foreignAccountError("set", set.id);
+  }
+}
+
 export type WorkoutRepo = {
   create(input: WorkoutCreateInput): Promise<WorkoutMutation>;
   update(id: string, patch: WorkoutPatch): Promise<WorkoutMutation>;
@@ -173,6 +225,7 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
         if (!existing) {
           throw new LocalValidationError(`workout not found: ${id}`);
         }
+        assertSessionOwned(deps, existing);
         const row: LocalRow<WorkoutSession> = {
           ...existing,
           local_date: patch.local_date ?? existing.local_date,
@@ -204,6 +257,7 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
           if (!session) {
             throw new LocalValidationError(`workout not found: ${id}`);
           }
+          assertSessionOwned(deps, session);
           const ops: OutboxOp[] = [];
           if (session.deleted_at === null) {
             const tomb: LocalRow<WorkoutSession> = { ...session, updated_at: iso, deleted_at: iso };
@@ -305,64 +359,90 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
       };
       assertValidEntry(row);
       const op = buildOutboxOp("exercise_entries", "create", row, now);
-      return db.transaction("rw", db.exercise_entries, db.outbox, async () => {
-        await db.exercise_entries.put(row);
-        await db.outbox.add(op);
-        return { row, op };
-      });
+      return db.transaction(
+        "rw",
+        db.exercise_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const session = await db.workout_sessions.get(input.workout_id);
+          if (!session) {
+            throw new LocalValidationError(`workout not found: ${input.workout_id}`);
+          }
+          assertSessionOwned(deps, session);
+          await db.exercise_entries.put(row);
+          await db.outbox.add(op);
+          return { row, op };
+        },
+      );
     },
 
     updateEntry(id: string, patch: EntryPatch): Promise<EntryMutation> {
       const now = nowDate(deps);
       const iso = now.toISOString();
-      return db.transaction("rw", db.exercise_entries, db.outbox, async () => {
-        const existing = await db.exercise_entries.get(id);
-        if (!existing) {
-          throw new LocalValidationError(`exercise entry not found: ${id}`);
-        }
-        const row: LocalRow<ExerciseEntry> = {
-          ...existing,
-          exercise_id: patch.exercise_id ?? existing.exercise_id,
-          order_index: patch.order_index ?? existing.order_index,
-          notes: patch.notes !== undefined ? patch.notes : existing.notes,
-          updated_at: iso,
-        };
-        assertValidEntry(row);
-        const op = buildOutboxOp("exercise_entries", "update", row, now);
-        await db.exercise_entries.put(row);
-        await db.outbox.add(op);
-        return { row, op };
-      });
+      return db.transaction(
+        "rw",
+        db.exercise_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const existing = await db.exercise_entries.get(id);
+          if (!existing) {
+            throw new LocalValidationError(`exercise entry not found: ${id}`);
+          }
+          await assertEntryOwned(db, deps, existing);
+          const row: LocalRow<ExerciseEntry> = {
+            ...existing,
+            exercise_id: patch.exercise_id ?? existing.exercise_id,
+            order_index: patch.order_index ?? existing.order_index,
+            notes: patch.notes !== undefined ? patch.notes : existing.notes,
+            updated_at: iso,
+          };
+          assertValidEntry(row);
+          const op = buildOutboxOp("exercise_entries", "update", row, now);
+          await db.exercise_entries.put(row);
+          await db.outbox.add(op);
+          return { row, op };
+        },
+      );
     },
 
     removeEntry(id: string): Promise<OutboxOp[]> {
       const now = nowDate(deps);
       const iso = now.toISOString();
-      return db.transaction("rw", db.exercise_entries, db.set_entries, db.outbox, async () => {
-        const entry = await db.exercise_entries.get(id);
-        if (!entry) {
-          throw new LocalValidationError(`exercise entry not found: ${id}`);
-        }
-        const ops: OutboxOp[] = [];
-        if (entry.deleted_at === null) {
-          const tomb: LocalRow<ExerciseEntry> = { ...entry, updated_at: iso, deleted_at: iso };
-          const op = buildOutboxOp("exercise_entries", "delete", tomb, now);
-          await db.exercise_entries.put(tomb);
-          await db.outbox.add(op);
-          ops.push(op);
-        }
-        const sets = await db.set_entries.where("exercise_entry_id").equals(id).toArray();
-        for (const set of sets) {
-          if (set.deleted_at === null) {
-            const tomb: LocalRow<SetEntry> = { ...set, updated_at: iso, deleted_at: iso };
-            const op = buildOutboxOp("set_entries", "delete", toSetWrite(tomb), now);
-            await db.set_entries.put(tomb);
+      return db.transaction(
+        "rw",
+        db.exercise_entries,
+        db.set_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const entry = await db.exercise_entries.get(id);
+          if (!entry) {
+            throw new LocalValidationError(`exercise entry not found: ${id}`);
+          }
+          await assertEntryOwned(db, deps, entry);
+          const ops: OutboxOp[] = [];
+          if (entry.deleted_at === null) {
+            const tomb: LocalRow<ExerciseEntry> = { ...entry, updated_at: iso, deleted_at: iso };
+            const op = buildOutboxOp("exercise_entries", "delete", tomb, now);
+            await db.exercise_entries.put(tomb);
             await db.outbox.add(op);
             ops.push(op);
           }
-        }
-        return ops;
-      });
+          const sets = await db.set_entries.where("exercise_entry_id").equals(id).toArray();
+          for (const set of sets) {
+            if (set.deleted_at === null) {
+              const tomb: LocalRow<SetEntry> = { ...set, updated_at: iso, deleted_at: iso };
+              const op = buildOutboxOp("set_entries", "delete", toSetWrite(tomb), now);
+              await db.set_entries.put(tomb);
+              await db.outbox.add(op);
+              ops.push(op);
+            }
+          }
+          return ops;
+        },
+      );
     },
 
     addSet(input: SetCreateInput): Promise<SetMutation> {
@@ -382,54 +462,82 @@ export function createWorkoutRepo(db: WaveformDb, deps: RepoDeps): WorkoutRepo {
       };
       assertValidSet(row);
       const op = buildOutboxOp("set_entries", "create", toSetWrite(row), now);
-      return db.transaction("rw", db.set_entries, db.outbox, async () => {
-        await db.set_entries.put(row);
-        await db.outbox.add(op);
-        return { row, op };
-      });
+      return db.transaction(
+        "rw",
+        db.set_entries,
+        db.exercise_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const entry = await db.exercise_entries.get(input.exercise_entry_id);
+          if (!entry) {
+            throw new LocalValidationError(`exercise entry not found: ${input.exercise_entry_id}`);
+          }
+          await assertEntryOwned(db, deps, entry);
+          await db.set_entries.put(row);
+          await db.outbox.add(op);
+          return { row, op };
+        },
+      );
     },
 
     updateSet(id: string, patch: SetPatch): Promise<SetMutation> {
       const now = nowDate(deps);
       const iso = now.toISOString();
-      return db.transaction("rw", db.set_entries, db.outbox, async () => {
-        const existing = await db.set_entries.get(id);
-        if (!existing) {
-          throw new LocalValidationError(`set not found: ${id}`);
-        }
-        const weight = patch.weight_kg ?? existing.weight_kg;
-        const reps = patch.reps ?? existing.reps;
-        const row: LocalRow<SetEntry> = {
-          ...existing,
-          set_index: patch.set_index ?? existing.set_index,
-          weight_kg: weight,
-          reps: reps,
-          is_warmup: patch.is_warmup ?? existing.is_warmup,
-          e1rm_kg: e1rmBrzycki(weight, reps),
-          updated_at: iso,
-        };
-        assertValidSet(row);
-        const op = buildOutboxOp("set_entries", "update", toSetWrite(row), now);
-        await db.set_entries.put(row);
-        await db.outbox.add(op);
-        return { row, op };
-      });
+      return db.transaction(
+        "rw",
+        db.set_entries,
+        db.exercise_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const existing = await db.set_entries.get(id);
+          if (!existing) {
+            throw new LocalValidationError(`set not found: ${id}`);
+          }
+          await assertSetOwned(db, deps, existing);
+          const weight = patch.weight_kg ?? existing.weight_kg;
+          const reps = patch.reps ?? existing.reps;
+          const row: LocalRow<SetEntry> = {
+            ...existing,
+            set_index: patch.set_index ?? existing.set_index,
+            weight_kg: weight,
+            reps: reps,
+            is_warmup: patch.is_warmup ?? existing.is_warmup,
+            e1rm_kg: e1rmBrzycki(weight, reps),
+            updated_at: iso,
+          };
+          assertValidSet(row);
+          const op = buildOutboxOp("set_entries", "update", toSetWrite(row), now);
+          await db.set_entries.put(row);
+          await db.outbox.add(op);
+          return { row, op };
+        },
+      );
     },
 
     removeSet(id: string): Promise<SetMutation> {
       const now = nowDate(deps);
       const iso = now.toISOString();
-      return db.transaction("rw", db.set_entries, db.outbox, async () => {
-        const existing = await db.set_entries.get(id);
-        if (!existing) {
-          throw new LocalValidationError(`set not found: ${id}`);
-        }
-        const row: LocalRow<SetEntry> = { ...existing, updated_at: iso, deleted_at: iso };
-        const op = buildOutboxOp("set_entries", "delete", toSetWrite(row), now);
-        await db.set_entries.put(row);
-        await db.outbox.add(op);
-        return { row, op };
-      });
+      return db.transaction(
+        "rw",
+        db.set_entries,
+        db.exercise_entries,
+        db.workout_sessions,
+        db.outbox,
+        async () => {
+          const existing = await db.set_entries.get(id);
+          if (!existing) {
+            throw new LocalValidationError(`set not found: ${id}`);
+          }
+          await assertSetOwned(db, deps, existing);
+          const row: LocalRow<SetEntry> = { ...existing, updated_at: iso, deleted_at: iso };
+          const op = buildOutboxOp("set_entries", "delete", toSetWrite(row), now);
+          await db.set_entries.put(row);
+          await db.outbox.add(op);
+          return { row, op };
+        },
+      );
     },
   };
 }

@@ -862,3 +862,86 @@ be confirmed. This review changed no production code.
 - A self-rescheduling timer must re-arm under the same liveness condition as its work. Gate the re-arm on the running flag (or re-check inside the scheduler) so a halt landing mid-tick cannot resurrect the timer after stop.
 - Test fakes that classify timers by delay value conflate purpose with duration. Tag timers by call site or purpose, or fail fast on collision, so a later configuration change cannot silently hide a timer from a probe.
 - A periodic trigger that must not fight backoff should gate on the state signal (status "idle"), not on absence of work, and the halt path must own the timer cleanup. Verify with one test per parked state: offline, error, waking, hidden, auth-expired.
+
+## 2026-10-16 - Tier 1.1-1.2 correctness (code review)
+
+Verdict: PASS WITH ISSUES (static analysis only: no shell tool in this review environment, so
+`git diff` and the test runner could NOT run; every listed file was read in full and the timeout,
+guard, and drain paths traced by hand; one Medium, six Low, three Info, no FAIL rows)
+
+Scope: the uncommitted Tier 1.1 and 1.2 changes in apps/web: 1.1a per-request AbortController
+timeout in `src/lib/api.ts` (REQUEST_TIMEOUT_MS at 63, `timeoutMs` at 147 and 194, timer at 218,
+finally clear at 263-265, body-abort classification at 252-261); 1.1b foreign-owner guards in
+`src/db/repos/exercises.ts` (89-100, 123-134), `workouts.ts` (115-154 and every mutating path),
+`activities.ts` (194-199, 253-258), `body.ts` (76-81, 169-174); 1.2a catalog op hygiene via the new
+`src/db/serverOwned.ts` consumed by `src/lib/backupImport.ts` (472, 611); 1.2b drain clean-drop and
+once-per-drain rejection in `src/lib/sync/drain.ts` (144-155), with new `src/lib/api.test.ts` and
+new/updated tests in `db/repos.test.ts`, `lib/backupImport.test.ts`, `lib/sync/drain.test.ts`,
+`lib/sync/engine.test.ts`. No production code changed by this review.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1. Timeout arming and clearing on every path | PASS with issues | The timer (api.ts:218) is armed after payload serialization (a JSON.stringify throw at 208 cannot leak it) and cleared in `finally` (263-265), which unwinds through every path: success (250-251), 204 (247-249), 401 (228-235, including an `onAuthExpired` that throws), non-2xx (237-244), transport abort (224-226), unreadable body (250-262). The controller is request-local (210) and nothing retains it after `send` settles, so no spurious abort can reach a later request; api.test.ts:191-226 pins exactly that (two requests, `clearTimeout` per settle, both signals still un-aborted well past the deadline). A hang aborts and classifies "timeout" (api.test.ts:159-189). Two nits: the success-body `signal.aborted` branch (255) is sound (only the local timer aborts this controller) but routes through `transportError` (176-189), which re-derives "timeout" from the cause's error name; throwing `ApiError("timeout", ...)` directly would be exact. And an abort during `readEnvelope`'s body read on error paths (158-174) is swallowed into a null envelope, so such a failure keeps its "client"/"server"/"auth-expired" kind instead of "timeout". Both Low; behaviorally inert today since the drain and engine map "timeout" and "offline" identically (drain.ts:81, engine outcomeForFailure). |
+| 2. Owner guards cover every mutation chain | PASS | Traced all chains. Creates stamp `deps.userId` (exercises.ts:65, workouts.ts:193, activities.ts:152, body.ts:104) so no create path can produce or touch a foreign row. Update and delete paths guard before any write: exercises 89-100 and 123-134; workouts update (220), remove (252), addEntry (360-364), updateEntry (385), removeEntry (416), addSet (463-467), updateSet (489), removeSet (524) via `assertSessionOwned`/`assertEntryOwned`/`assertSetOwned` (123-154) which walk set to entry to session; activities 194-199 and 253-258 before both the tombstone and the climb_sends delete; body 76-81 and 169-174. Cascades in `remove`/`removeEntry` only touch children of the already-guarded session or entry, so no descendant write can reach a foreign row. Every guard runs inside the same Dexie transaction it protects, and every table a guard reads is in that transaction's scope (checked each: workouts transactions include `workout_sessions` and `exercise_entries` where the guards read them), so the added scope is correct and the check and write are race-free. `LocalValidationError` is the established type (validation.ts:50) and is thrown consistently everywhere; `lib/errors.ts:15-17` surfaces its issues to the UI, so the refusal messages reach the user. |
+| 3. Catalog op hygiene (import) | PASS with issues | `mergeById` writes the row before the predicate (backupImport.ts:470-474) and `runReplace` puts before the predicate (609-613), so catalog rows land locally with zero ops in both modes; opsQueued counts confirm (merge test backupImport.test.ts:481-514 with two exercises and one op, replace test 908-935 with `opsQueued` 0). A custom exercise can never be misclassified: `isServerOwnedRow` (serverOwned.ts:18-26) requires `entity === "exercises"` and a strict `owner_id === null`, and custom rows always carry a string owner (exercises.ts:65). Placement in `db/` is sensible since both `lib/backupImport` and `lib/sync/drain` consume it. One gap: the parse validates exercises rows only with `baseRowIssues` (backupImport.ts:320-323), so `owner_id` shape is never checked; a malformed row with a missing `owner_id` classifies as user-owned, queues an op, and eventually quarantines after three rejections. Low. |
+| 4. Drain clean-drop, once-per-drain rejection, termination | PASS with issues | The rejected branch (drain.ts:144-155) clean-drops only a server-owned catalog op (acked, no `markOutboxFailed`, no quarantine) and otherwise records exactly one failure and defers. The module contract holds: `deferred` only grows within a drain (100, 135, 153, 157), batch selection filters only deferred ids (107), and each loop iteration either removes rows or grows `deferred`, so the loop terminates and every queued op earns at least one attempt per drain. A catalog rejection cannot suppress a non-catalog result: results are keyed by op_id (126-129) and the predicate is entity- and field-specific. Quarantine at 3 across separate drains holds (one `markOutboxFailed` per drain, outbox.ts:75-81 thresholds at 3) and is pinned by drain.test.ts:163-200. Count distortion: the engine consumes only `drained.aborted` (engine.ts:440) and computes pending/quarantined from local outbox state, so counting clean drops as `acked` distorts nothing user-visible; only the `DrainResult.acked` doc (drain.ts:53-54, "after an acked status") is now stale. Low. |
+| 5. Test quality | PASS with issues | The new tests prove their claims: timeout classification and default deadline (api.test.ts:159-189), timer clearing and no spurious abort (191-226), per-store foreign rejection with row equality and `outbox.count()` 0 plus create-under-foreign-parent cases (repos.test.ts:591-786), zero catalog ops on replace with the row restored (backupImport.test.ts:908-935), custom-exercise op preserved on merge (516-540), one-attempt-per-drain with call counting and cross-drain quarantine with `attempts`/`quarantined` assertions (drain.test.ts:163-200), clean drop (202-224), and deferral past a rejected op (226-254). The adapted engine test (engine.test.ts:699-729) seeds the post-three-drain quarantined state instead of driving three runs and explains why in a comment; the end-to-end drive-to-quarantine lives in drain.test.ts, so nothing was weakened, only relocated. Gaps: no test for the success-body abort branch (api.ts:255), no proof that `timeoutMs` actually shortens the deadline (the override is used only in the clearing test), no `clearTimeout` assertion on error paths, and no direct unit test of `isServerOwnedRow` (a non-exercises entity carrying `owner_id: null` is untested). Without git the "adapted" set could not be diffed, so this is read-based only. |
+| 6. Conventions and integration | PASS | Strict TS with no `any`, SCREAMING_SNAKE for `REQUEST_TIMEOUT_MS`, snake_case row fields, PascalCase types, K&R with 4-space indent. No em dashes or double hyphens in any changed file (grep). All changes are additive at the module boundaries; `SyncEngine`, `ApiClient`, and repo signatures are unchanged except the added optional `timeoutMs`. One style nit: workouts.ts:418-435 (the `removeEntry` cascade block) lost its indentation level relative to its enclosing transaction body. |
+
+### Findings (FAIL items and non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | apps/web/src/db/repos/body.ts:73-81 | The upsert's live-row lookup (`forDate.find((row) => row.deleted_at === null)`) is not owner-scoped. When two live rows share a `local_date` (reachable today by merging a foreign backup under another account), `find` picks whichever row Dexie returns first: it can throw "belongs to another account" even though the current user's own live row exists for that date, or silently pick the right one. Behavior is arbitrary per id order. | Prefer the current user's row: `forDate.find((row) => row.deleted_at === null && row.user_id === deps.userId)`, and apply the foreign-only guard (or the recommended create) only when no own live row exists. |
+| Low | apps/web/src/lib/api.ts:252-261 | The body-read abort branch classifies via `transportError(cause)`, re-deriving "timeout" from the cause's error name. An abort surfacing under any other name would report "offline". Sound in principle (only the local timer aborts this controller) but inexact and untested. | In the `controller.signal.aborted` branch throw `new ApiError("timeout", "The request timed out.", { cause })` directly, and add a fake-timer test where the body read alone hangs past the deadline. |
+| Low | apps/web/src/lib/api.test.ts | Three gaps around 1.1a: no test for the success-body abort branch (api.ts:255), no test that `timeoutMs` shortens the deadline (the override is exercised only in the clearing test), and no `clearTimeout` assertion on the 401 / non-2xx / unreadable-body paths. | Add: a body that never settles with `advanceTimersByTimeAsync(timeoutMs)` asserting kind "timeout"; a `timeoutMs: 1000` hang asserting abort at 1000; a `clearSpy` count on one error-path request. |
+| Low | apps/web/src/lib/backupImport.ts:320-323 (with db/serverOwned.ts:25) | Exercises rows are checked only by `baseRowIssues`; `owner_id` shape (string or null) is never validated. A row with a missing `owner_id` fails `=== null`, classifies as user-owned, queues an op, and lands in quarantine after three rejections. Import is otherwise all-or-nothing on shape, so this is the one field the parse lets through unchecked. | Add an `owner_id` shape check to the exercises row loop (`string or null`), symmetric with `isServerOwnedRow`. |
+| Low | apps/web/src/lib/sync/drain.ts:53-54 | `DrainResult.acked`'s doc ("Ops removed from the outbox after an acked status") is stale: clean-dropped catalog rejections increment `acked` on a "rejected" status. No engine surface consumes the count (engine.ts:432-441 reads only `aborted`), so nothing distorts, but the contract text now lies. | Reword to "ops removed from the outbox: acked statuses plus clean-dropped catalog rejections", or count drops in their own field. |
+| Low | apps/web/src/db/repos/workouts.ts:116-121 | `foreignAccountError` says "this row belongs to another account" while exercises (99), activities (196), and body (78) use specific nouns. The generic wording reaches the UI status region through `lib/errors.ts` and reads vaguer than its siblings. | Use "this workout/entry/set belongs to another account" per call site, matching the other repos. |
+| Low | apps/web/src/db/repos/workouts.ts:418-435 | The `removeEntry` cascade block sits one indent level outside its enclosing transaction body. Cosmetic, but it will churn `pnpm lint`/format gates and obscures the guard placement at 416. | Re-indent the block to match `remove` (253-281). |
+| Info | apps/web/src/lib/api.ts:228-244 (readEnvelope 158-174) | On the 401 and non-2xx paths an abort during the error body's read is swallowed into a null envelope, so the failure keeps its "auth-expired"/"client"/"server" kind rather than becoming "timeout". Acceptable (a response did arrive; the message falls back), and inert today because drain and engine map timeout and offline identically. | Optional: mirror the `signal.aborted` check in `readEnvelope`, or note the intentional difference in the header comment. |
+| Info | apps/web/src/db/repos/body.ts:166-168, activities.ts:250-252 | `remove` on an already-tombstoned foreign row returns `[]` before the owner check, so a caller probing ownership sees success for a foreign id. No write happens either way, so this is semantics, not safety. | Optional: check ownership before the tombstone short-circuit, or document the "already gone wins" precedence. |
+| Info | apps/web/src/db/repos/exercises.ts:60-79 | Pre-existing and out of scope, but `createCustom` performs no field validation (name, muscle_group, equipment) while every other create path calls its assert guard. Malformed custom rows reach the outbox and the server. | Add an `assertValidExercise` guard for symmetry with the other repos. |
+
+### Recommendation on the flagged behavior change (body upsert throws on a foreign live row)
+
+Keep the throw for Tier 1. It preserves the documented "exactly one live row per local_date"
+invariant (body.ts:4-8), and the read paths (`listRange` 128-141, `listAll` 143-156) are not
+user-scoped, so create-instead would double-plot dates in bodyChart and weekStats and corrupt
+"latest weight" picks with silent mixed-account data. The refusal is also user-legible: the
+`LocalValidationError` issues surface in the status region (lib/errors.ts:15-17). Create-instead is
+the right end state only when paired with (a) the own-row-first lookup from the Medium finding
+above and (b) user-scoped reads across the repos; until then a loud refusal beats a quiet chart
+corruption. Also worth a later pass: refuse to import a backup whose rows carry a foreign
+`user_id`/`owner_id`, which is the realistic source of foreign rows on a device and would make this
+guard unreachable in practice.
+
+### Verification Checklist
+
+- [x] All six requested checks PASS with issues; findings above are one Medium, six Low, three Info, no FAIL rows
+- [ ] Command gates NOT RUN: no shell tool in this review environment, so `git diff` and the test runner could not execute; all listed files read in full and traced by hand. Recommend a green `pnpm test --filter @waveform/web` and `pnpm lint` before merge.
+- [x] No critical issues found (no Critical or High)
+- [x] Code follows project conventions (strict TS, no `any`, SCREAMING_SNAKE const, snake_case locals, PascalCase types, K&R braces; one indentation nit at workouts.ts:418-435)
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation (grep clean across apps/web/src)
+- [x] Phase code integrates cleanly with prior phases (guards are additive inside existing transactions, the timeout is additive to `ApiClientOptions`, the drain change is internal to the result loop, and the engine consumes only `aborted`, which is unchanged)
+
+### Recurring patterns for other agents
+
+- A request deadline must clear in `finally`, arm only after body serialization, and classify aborts
+  from request-local state (a per-request AbortController), never from shared flags; when the abort
+  source is unambiguous, throw the specific error directly instead of re-deriving the kind from the
+  cause's error name.
+- Ownership guards belong inside the transaction they protect and before the first write, and every
+  table the guard reads must be in that transaction's scope. Check all ancestor chains for create
+  paths too: stamping the owner on create is the guard for creates.
+- A lookup keyed by a shared natural key (here `local_date`) must filter by owner before it finds,
+  or a foreign row can shadow the caller's own row and turn a guard into a spurious refusal.
+- A "clean drop" of server-owned rows needs one shared predicate used by every producer and
+  consumer (import, drain), strict about the owned marker (`=== null`, not falsy), plus parse-time
+  validation of that marker so malformed rows cannot pick their own classification.
+- When a retry policy changes (rejected ops deferred to once per drain), pin both invariants
+  separately: at-least-once per drain with call counting, and quarantine across drains with
+  `attempts` assertions. If an adapted test must seed the end state instead of driving it, say why
+  in a comment and keep the end-to-end drive in one suite.

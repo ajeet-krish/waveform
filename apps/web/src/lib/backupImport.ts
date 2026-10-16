@@ -16,8 +16,10 @@
  * however they are shaped) and never touches existing outbox rows;
  * replace wipes the data
  * stores, outbox, and sync_meta, then restores every backup row with one
- * op each. Op updated_at always equals the row's own updated_at (LWW
- * truth), while op created_at is import time so the outbox drains in
+ * op each. Server-owned catalog exercise rows are the exception in both
+ * modes: they are written locally but queue no op, since the server
+ * already owns them. Op updated_at always equals the row's own updated_at
+ * (LWW truth), while op created_at is import time so the outbox drains in
  * import order. After any apply, ensureCatalog self-heals a backup that
  * carries no catalog rows and reconciles stale global catalog rows back
  * to the current seed (a hard delete writes no ops, so the queue is
@@ -36,6 +38,7 @@ import type {
 } from "@waveform/api-types";
 import { ensureCatalog } from "../db/seed/ensureCatalog";
 import { buildOutboxOp } from "../db/outbox";
+import { isServerOwnedRow } from "../db/serverOwned";
 import type { WaveformDb } from "../db/schema";
 import type {
   ClimbSends,
@@ -317,6 +320,12 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
   for (const row of exerciseRows) {
     const label = `exercises/${String(row.id)}`;
     issues.push(...baseRowIssues(label, row));
+    // isServerOwnedRow classifies a row as server-owned only when owner_id
+    // is exactly null; any other shape would read as user-owned and push an
+    // op the server then quarantines. Reject it up front instead.
+    if (!(row.owner_id === null || typeof row.owner_id === "string")) {
+      issues.push(`${label}: owner_id must be null or a string`);
+    }
   }
   for (const row of sessionRows) {
     const label = `workout_sessions/${String(row.id)}`;
@@ -446,7 +455,8 @@ function restoreAction(row: { deleted_at: string | null }): OutboxAction {
  * Merges one id-keyed store: absent rows are written (create, or a
  * delete op when the incoming row is a tombstone), present rows win only
  * when the incoming updated_at is strictly newer, and the rest are
- * skipped without an op. Returns rows written; ops append to `ops`.
+ * skipped without an op. Server-owned catalog rows are written locally
+ * without an op. Returns rows written; ops append to `ops`.
  */
 async function mergeById<E extends OutboxEntity>(
   table: EntityTable<OutboxRowMap[E], "id">,
@@ -465,7 +475,9 @@ async function mergeById<E extends OutboxEntity>(
     }
     await table.put(row);
     written += 1;
-    ops.push(buildOutboxOp(entity, rowAction(row, local !== undefined), row, now, row.updated_at));
+    if (!isServerOwnedRow(entity, row)) {
+      ops.push(buildOutboxOp(entity, rowAction(row, local !== undefined), row, now, row.updated_at));
+    }
   }
   return written;
 }
@@ -601,7 +613,10 @@ async function runReplace(
       const ops: OutboxOp[] = [];
       for (const row of backup.exercises) {
         await db.exercises.put(row);
-        ops.push(buildOutboxOp("exercises", restoreAction(row), row, now, row.updated_at));
+        // Catalog rows are server-owned: restore them locally, queue no op.
+        if (!isServerOwnedRow("exercises", row)) {
+          ops.push(buildOutboxOp("exercises", restoreAction(row), row, now, row.updated_at));
+        }
       }
       for (const row of backup.workout_sessions) {
         await db.workout_sessions.put(row);

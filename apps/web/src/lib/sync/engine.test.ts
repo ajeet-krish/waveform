@@ -706,10 +706,17 @@ describe("createSyncEngine counts", () => {
         })),
       }),
     });
-    await h.db.outbox.add(op("w1", "2026-10-01T00:00:00.000Z", "op-a"));
+    // A fresh drain attempts a rejected op once and defers it, so it is
+    // not quarantined until three separate drains have run. Seed the
+    // post-three-drain state directly to test the count surfacing.
+    await h.db.outbox.add({
+      ...op("w1", "2026-10-01T00:00:00.000Z", "op-a"),
+      attempts: 3,
+      last_error: "invalid_payload",
+      quarantined: true,
+    });
 
     await h.engine.start();
-    // The drain rejected it three times inside one run, then quarantined.
     expect(h.engine.status()).toBe("idle");
     expect(h.engine.quarantinedCount()).toBe(1);
     expect(h.engine.pendingCount()).toBe(0);

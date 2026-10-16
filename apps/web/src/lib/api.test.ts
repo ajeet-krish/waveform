@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApiErrorBody } from "@waveform/api-types";
-import { ApiError, createApiClient, resolveApiBaseUrl, type FetchFn } from "./api";
+import {
+  ApiError,
+  REQUEST_TIMEOUT_MS,
+  createApiClient,
+  resolveApiBaseUrl,
+  type FetchFn,
+} from "./api";
 
 /** A canned Response for the mocked fetch. */
 function jsonResponse(status: number, body: unknown): Response {
@@ -144,6 +150,79 @@ describe("createApiClient", () => {
     const timeoutApi = createApiClient({ baseUrl: "https://api.test", fetchFn: timeoutFetch });
     const timeoutError = await timeoutApi.me().catch((error: unknown) => error);
     expect((timeoutError as ApiError).kind).toBe("timeout");
+  });
+
+  it("exposes a 60 second default request deadline", () => {
+    expect(REQUEST_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it("aborts a hanging request at the deadline and classifies it as timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      // A fetch that only ever settles when its request signal aborts.
+      const fetchFn: FetchFn = (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const abort = () => {
+            const error = new Error("The request was aborted.");
+            error.name = "AbortError";
+            reject(error);
+          };
+          const signal = init.signal;
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort);
+        });
+      // No timeoutMs: the default deadline is exercised.
+      const api = createApiClient({ baseUrl: "https://api.test", fetchFn });
+      const pending = api.me().catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+      const failure = await pending;
+
+      expect(failure).toBeInstanceOf(ApiError);
+      expect((failure as ApiError).kind).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the deadline on a normal response and never aborts a later request", async () => {
+    vi.useFakeTimers();
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    try {
+      const { fetchFn, calls } = recordingFetch([
+        jsonResponse(200, USER),
+        jsonResponse(200, USER),
+      ]);
+      const api = createApiClient({
+        baseUrl: "https://api.test",
+        token: "tok",
+        fetchFn,
+        timeoutMs: 1000,
+      });
+
+      await expect(api.me()).resolves.toEqual(USER);
+      await expect(api.me()).resolves.toEqual(USER);
+
+      // Every settled request cleared its own timer.
+      expect(clearSpy).toHaveBeenCalledTimes(2);
+      const firstSignal = calls[0]?.init.signal;
+      const secondSignal = calls[1]?.init.signal;
+      expect(firstSignal?.aborted).toBe(false);
+      expect(secondSignal?.aborted).toBe(false);
+
+      // Well past the deadline, nothing fires: the timers were cleared and
+      // neither request (nor a later one) is spuriously aborted.
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+      expect(firstSignal?.aborted).toBe(false);
+      expect(secondSignal?.aborted).toBe(false);
+      expect(calls).toHaveLength(2);
+    } finally {
+      clearSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("maps 5xx to server and 4xx to client, parsing the error envelope", async () => {

@@ -191,6 +191,12 @@ export function createActivityRepo(db: WaveformDb, deps: RepoDeps): ActivityRepo
         if (!existing || existing.deleted_at !== null) {
           throw new LocalValidationError(`activity not found: ${id}`);
         }
+        if (existing.user_id !== deps.userId) {
+          throw new LocalValidationError(
+            "this activity belongs to another account",
+            [`activity ${id} is owned by another account`],
+          );
+        }
         // A patch cannot move a row across types: climbing rows keep
         // null distance/elevation, cycling rows keep null climb fields.
         const isClimb = existing.type === "climbing";
@@ -243,6 +249,12 @@ export function createActivityRepo(db: WaveformDb, deps: RepoDeps): ActivityRepo
         const existing = await db.activities.get(id);
         if (!existing || existing.deleted_at !== null) {
           return [];
+        }
+        if (existing.user_id !== deps.userId) {
+          throw new LocalValidationError(
+            "this activity belongs to another account",
+            [`activity ${id} is owned by another account`],
+          );
         }
         const tomb: LocalRow<Activity> = { ...existing, updated_at: iso, deleted_at: iso };
         const op = buildOutboxOp("activities", "delete", tomb, now);

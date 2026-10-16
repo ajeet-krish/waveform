@@ -4,7 +4,7 @@ import { createWaveformDb, type WaveformDb } from "../db/schema";
 import type { LocalProfile, LocalRow, WorkoutDraft } from "../db/types";
 import { LocalValidationError } from "../db/validation";
 import { catalogSeedId } from "../db/seed/uuidV5";
-import type { WorkoutSession } from "@waveform/api-types";
+import type { WorkoutSession, Exercise } from "@waveform/api-types";
 import { collectBackup, serializeBackup, type WaveformBackupV2 } from "./backup";
 import { applyBackupImport, parseBackup, parseImportFile } from "./backupImport";
 import { subscribeStorageFailures, isQuotaExceeded, type StorageFailure } from "./storage";
@@ -372,6 +372,23 @@ describe("parseBackup", () => {
     }
   });
 
+  it("rejects an exercise row whose owner_id is neither a string nor null", () => {
+    // A malformed owner_id would read as user-owned and later quarantine;
+    // the all-or-nothing parse rejects it up front instead.
+    const result = parseBackup(
+      tamperedText((root) => {
+        const row = firstRow(root, "exercises");
+        if (row) {
+          row.owner_id = 42;
+        }
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((issue) => issue.includes("owner_id"))).toBe(true);
+    }
+  });
+
   it("rejects bad ISO timestamps and a bad deleted_at", () => {
     const badUpdated = parseBackup(
       tamperedText((root) => {
@@ -495,21 +512,48 @@ describe("applyBackupImport: merge", () => {
       body_stats: 1,
       climb_sends: 1,
     });
-    // Climb histograms are device-local: no ops. Everything else queues one.
-    expect(summary.opsQueued).toBe(8);
+    // Climb histograms are device-local: no ops. Custom exercises queue
+    // one; server-owned catalog rows queue none.
+    expect(summary.opsQueued).toBe(7);
     expect(summary.profileRestored).toBe(true);
 
     expect(await db.workout_sessions.get("sess-1")).toEqual(sampleBackup().workout_sessions[0]);
     expect((await db.local_profile.toArray())[0]?.display_name).toBe("Ada");
 
     const ops = await db.outbox.toArray();
-    expect(ops).toHaveLength(8);
+    expect(ops).toHaveLength(7);
     const sessionOp = ops.find((op) => op.entity === "workout_sessions");
     expect(sessionOp?.action).toBe("create");
     expect(sessionOp?.updated_at).toBe(STAMP);
     expect(sessionOp?.created_at).toBe(IMPORT_TIME);
     const tombOp = ops.find((op) => op.entity === "exercises" && op.action === "delete");
     expect(tombOp?.payload.id).toBe("ex-zettel");
+  });
+
+  it("queues exactly one op for a custom (owned) exercise on merge", async () => {
+    const db = harness("merge-custom-op");
+    const custom: LocalRow<Exercise> = {
+      id: "ex-custom",
+      owner_id: "user-1",
+      name: "Zettel Curl",
+      muscle_group: "biceps",
+      equipment: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+    const backup = emptyBackup();
+    backup.exercises = [custom];
+
+    const summary = await applyBackupImport(db, backup, { mode: "merge", now: importNow() });
+
+    expect(summary.stores.exercises).toBe(1);
+    expect(summary.opsQueued).toBe(1);
+    expect(await db.exercises.get("ex-custom")).toEqual(custom);
+    const ops = await db.outbox.toArray();
+    expect(ops).toHaveLength(1);
+    expect(ops[0]?.entity).toBe("exercises");
+    expect(ops[0]?.action).toBe("create");
   });
 
   it("is idempotent: a second identical import writes nothing and queues nothing", async () => {
@@ -824,17 +868,18 @@ describe("applyBackupImport: replace", () => {
       body_stats: 1,
       climb_sends: 1,
     });
-    // One op per restored row across the six synced entities (no climb ops).
-    expect(summary.opsQueued).toBe(8);
+    // One op per restored user-owned row across the six synced entities
+    // (no climb ops, no catalog-exercise ops).
+    expect(summary.opsQueued).toBe(7);
 
     // Local-only rows are gone; backup rows are back with recomputed e1rm.
     expect(await db.workout_sessions.get("sess-local")).toBeUndefined();
     expect(await db.workout_sessions.get("sess-1")).toBeDefined();
     expect((await db.set_entries.get("set-1"))?.e1rm_kg).toBe(e1rmBrzycki(100, 5));
 
-    // The stale op is gone; the queue is exactly the restored rows.
+    // The stale op is gone; the queue is exactly the restored user-owned rows.
     const ops = await db.outbox.toArray();
-    expect(ops).toHaveLength(8);
+    expect(ops).toHaveLength(7);
     expect(ops.some((op) => op.op_id === "op-stale")).toBe(false);
     expect(ops.every((op) => op.created_at === IMPORT_TIME)).toBe(true);
     const setOp = ops.find((op) => op.entity === "set_entries");
@@ -875,6 +920,35 @@ describe("applyBackupImport: replace", () => {
     expect(catalog.every((row) => row.owner_id === null)).toBe(true);
     // Seeding writes no outbox ops (server-owned rows).
     expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("writes server-owned catalog rows without queuing an op for them", async () => {
+    const db = harness("replace-catalog-no-ops");
+    const backup = emptyBackup();
+    backup.exercises = [
+      {
+        id: BENCH_SEED_ID,
+        owner_id: null,
+        name: "Bench Press (Barbell)",
+        muscle_group: "chest",
+        equipment: "barbell",
+        created_at: STAMP,
+        updated_at: STAMP,
+        deleted_at: null,
+      },
+    ];
+
+    const summary = await applyBackupImport(db, backup, {
+      mode: "replace",
+      confirmReplace: true,
+      now: importNow(),
+    });
+
+    // The catalog row is restored locally, but no op is queued for it.
+    expect(summary.stores.exercises).toBe(1);
+    expect(summary.opsQueued).toBe(0);
+    expect(await db.outbox.count()).toBe(0);
+    expect(await db.exercises.get(BENCH_SEED_ID)).toBeDefined();
   });
 
   it("leaves every store unchanged when a quota failure hits during the restore", async () => {

@@ -48,6 +48,27 @@ function op(id: string, created_at: string, op_id: string): OutboxOp {
   };
 }
 
+/** An outbox op for a server-owned catalog exercise (owner_id null). */
+function catalogOp(op_id: string): OutboxOp {
+  return {
+    op_id,
+    entity: "exercises",
+    action: "create",
+    payload: {
+      id: "ex-catalog",
+      owner_id: null,
+      name: "Bench Press (Barbell)",
+      muscle_group: "chest",
+      equipment: "barbell",
+      created_at: "2026-10-01T00:00:00.000Z",
+      updated_at: "2026-10-01T00:00:00.000Z",
+      deleted_at: null,
+    },
+    updated_at: "2026-10-01T00:00:00.000Z",
+    created_at: "2026-10-01T00:00:00.000Z",
+  };
+}
+
 /** Mirrors a server that acknowledges every op as applied. */
 function allApplied(ops: PushOp[]): OpResult[] {
   return ops.map((o) => ({ op_id: o.op_id, status: "applied" as const, error: null }));
@@ -139,7 +160,7 @@ describe("drainOutbox", () => {
     expect(await db.outbox.count()).toBe(0);
   });
 
-  it("records rejects and quarantines the op on the third failure", async () => {
+  it("attempts a rejected op once per drain and quarantines it after three drains", async () => {
     const db = harness("quarantine");
     await db.outbox.add(op("w1", "2026-10-01T00:00:00.000Z", "op-a"));
     const calls: PushOp[][] = [];
@@ -150,12 +171,17 @@ describe("drainOutbox", () => {
       },
     };
 
-    const result = await drainOutbox({ db, api });
-    // The rejected op stays queued and is retried inside the same drain
-    // until attempts reaches 3, then it is quarantined out of the queue.
-    expect(result.pushed).toBe(3);
-    expect(result.rejected).toBe(3);
-    expect(result.acked).toBe(0);
+    const first = await drainOutbox({ db, api });
+    // A rejected op is attempted once per drain, not repeatedly inside one.
+    expect(first).toEqual({ pushed: 1, acked: 0, rejected: 1 });
+    expect(calls).toHaveLength(1);
+    const afterOne = await db.outbox.get("op-a");
+    expect(afterOne?.attempts).toBe(1);
+    expect(afterOne?.quarantined).toBe(false);
+
+    // Two more separate drains reach the quarantine threshold.
+    await drainOutbox({ db, api });
+    await drainOutbox({ db, api });
     expect(calls).toHaveLength(3);
 
     const stored = await db.outbox.get("op-a");
@@ -170,6 +196,61 @@ describe("drainOutbox", () => {
     // A fresh drain skips it entirely.
     const again = await drainOutbox({ db, api });
     expect(again).toEqual({ pushed: 0, acked: 0, rejected: 0 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("clean-drops a rejected server-owned catalog op with no quarantine", async () => {
+    const db = harness("catalog-reject");
+    await db.outbox.add(catalogOp("op-cat"));
+    const api: SyncPushApi = {
+      async push(ops) {
+        return {
+          results: ops.map((o) => ({
+            op_id: o.op_id,
+            status: "rejected" as const,
+            error: "invalid_payload" as const,
+          })),
+        };
+      },
+    };
+
+    const result = await drainOutbox({ db, api });
+    // Acknowledged and removed, with no failed attempt recorded.
+    expect(result).toEqual({ pushed: 1, acked: 1, rejected: 0 });
+    expect(await db.outbox.get("op-cat")).toBeUndefined();
+    expect(await db.outbox.count()).toBe(0);
+    const repo = createOutboxRepo(db);
+    expect(await repo.listPending()).toHaveLength(0);
+  });
+
+  it("defers a rejected op so later ops still sync in the same drain", async () => {
+    const db = harness("reject-defer");
+    await db.outbox.bulkAdd([
+      op("w1", "2026-10-01T00:00:00.000Z", "op-a"),
+      op("w2", "2026-10-02T00:00:00.000Z", "op-b"),
+    ]);
+    const calls: PushOp[][] = [];
+    const api: SyncPushApi = {
+      async push(ops) {
+        calls.push(ops);
+        return {
+          results: ops.map((o) =>
+            o.op_id === "op-a"
+              ? { op_id: o.op_id, status: "rejected" as const, error: "invalid_payload" as const }
+              : { op_id: o.op_id, status: "applied" as const, error: null },
+          ),
+        };
+      },
+    };
+
+    const result = await drainOutbox({ db, api, cap: 1 });
+    // The rejected op is deferred; op-b still gets its own push.
+    expect(calls.map((batch) => batch.map((o) => o.op_id))).toEqual([["op-a"], ["op-b"]]);
+    expect(result).toEqual({ pushed: 2, acked: 1, rejected: 1 });
+    expect(result.aborted).toBeUndefined();
+    const remaining = await db.outbox.toArray();
+    expect(remaining.map((o) => o.op_id)).toEqual(["op-a"]);
+    expect((await db.outbox.get("op-a"))?.attempts).toBe(1);
   });
 
   it("leaves retryable ops queued without burning an attempt", async () => {

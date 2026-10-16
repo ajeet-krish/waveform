@@ -92,6 +92,12 @@ export function createExerciseRepo(db: WaveformDb, deps: RepoDeps): ExerciseRepo
             [`exercise ${id} is a catalog row (owner_id null)`],
           );
         }
+        if (existing.owner_id !== deps.userId) {
+          throw new LocalValidationError(
+            "this exercise belongs to another account",
+            [`exercise ${id} is owned by another account`],
+          );
+        }
         const row: LocalRow<Exercise> = {
           ...existing,
           name: input.name ?? existing.name,
@@ -118,6 +124,12 @@ export function createExerciseRepo(db: WaveformDb, deps: RepoDeps): ExerciseRepo
           throw new LocalValidationError(
             "global catalog exercise cannot be deleted",
             [`exercise ${id} is a catalog row (owner_id null)`],
+          );
+        }
+        if (existing.owner_id !== deps.userId) {
+          throw new LocalValidationError(
+            "this exercise belongs to another account",
+            [`exercise ${id} is owned by another account`],
           );
         }
         // Soft only: history keeps referencing the row through its tombstone.

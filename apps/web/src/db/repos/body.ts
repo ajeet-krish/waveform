@@ -71,20 +71,24 @@ export function createBodyRepo(db: WaveformDb, deps: RepoDeps): BodyStatRepo {
       const iso = now.toISOString();
       return db.transaction("rw", db.body_stats, db.outbox, async () => {
         const forDate = await db.body_stats.where("local_date").equals(input.local_date).toArray();
-        const live = forDate.find((row) => row.deleted_at === null);
-        if (live) {
+        const liveRows = forDate.filter((row) => row.deleted_at === null);
+        // Own row first: a date the signed-in user already logged patches
+        // that row. Only when they have none does a foreign live row on the
+        // date refuse the write, keeping one live row per date.
+        const own = liveRows.find((row) => row.user_id === deps.userId);
+        if (own) {
           const row: LocalRow<BodyStats> = {
-            ...live,
-            weight_kg: mergeField(input.weight_kg, live.weight_kg),
-            bodyfat_pct: mergeField(input.bodyfat_pct, live.bodyfat_pct),
-            neck_cm: mergeField(input.neck_cm, live.neck_cm),
-            shoulders_cm: mergeField(input.shoulders_cm, live.shoulders_cm),
-            chest_cm: mergeField(input.chest_cm, live.chest_cm),
-            bicep_cm: mergeField(input.bicep_cm, live.bicep_cm),
-            waist_cm: mergeField(input.waist_cm, live.waist_cm),
-            hips_cm: mergeField(input.hips_cm, live.hips_cm),
-            thigh_cm: mergeField(input.thigh_cm, live.thigh_cm),
-            calf_cm: mergeField(input.calf_cm, live.calf_cm),
+            ...own,
+            weight_kg: mergeField(input.weight_kg, own.weight_kg),
+            bodyfat_pct: mergeField(input.bodyfat_pct, own.bodyfat_pct),
+            neck_cm: mergeField(input.neck_cm, own.neck_cm),
+            shoulders_cm: mergeField(input.shoulders_cm, own.shoulders_cm),
+            chest_cm: mergeField(input.chest_cm, own.chest_cm),
+            bicep_cm: mergeField(input.bicep_cm, own.bicep_cm),
+            waist_cm: mergeField(input.waist_cm, own.waist_cm),
+            hips_cm: mergeField(input.hips_cm, own.hips_cm),
+            thigh_cm: mergeField(input.thigh_cm, own.thigh_cm),
+            calf_cm: mergeField(input.calf_cm, own.calf_cm),
             updated_at: iso,
           };
           assertValidBodyStat(row);
@@ -92,6 +96,13 @@ export function createBodyRepo(db: WaveformDb, deps: RepoDeps): BodyStatRepo {
           await db.body_stats.put(row);
           await db.outbox.add(op);
           return { row, op };
+        }
+        const foreign = liveRows.find((row) => row.user_id !== deps.userId);
+        if (foreign) {
+          throw new LocalValidationError(
+            "this body stat belongs to another account",
+            [`body stat ${foreign.id} is owned by another account`],
+          );
         }
         const row: LocalRow<BodyStats> = {
           id: crypto.randomUUID(),
@@ -159,6 +170,12 @@ export function createBodyRepo(db: WaveformDb, deps: RepoDeps): BodyStatRepo {
         }
         if (existing.deleted_at !== null) {
           return [];
+        }
+        if (existing.user_id !== deps.userId) {
+          throw new LocalValidationError(
+            "this body stat belongs to another account",
+            [`body stat ${id} is owned by another account`],
+          );
         }
         const tomb: LocalRow<BodyStats> = { ...existing, updated_at: iso, deleted_at: iso };
         const op = buildOutboxOp("body_stats", "delete", tomb, now);

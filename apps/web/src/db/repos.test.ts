@@ -1,8 +1,16 @@
 import { e1rmBrzycki } from "@waveform/scoring";
 import { afterEach, describe, expect, it } from "vitest";
+import type {
+  Activity,
+  BodyStats,
+  Exercise,
+  ExerciseEntry,
+  SetEntry,
+  WorkoutSession,
+} from "@waveform/api-types";
 import { createRepos, type Repos } from "./repos";
 import { createWaveformDb, type WaveformDb } from "./schema";
-import type { WorkoutDraft } from "./types";
+import type { LocalRow, WorkoutDraft } from "./types";
 import {
   LocalValidationError,
   assertValidEntry,
@@ -577,6 +585,232 @@ describe("workouts repo", () => {
     expect(ops.map((op) => op.entity).sort()).toEqual(["exercise_entries", "set_entries"]);
     expect((await db.exercise_entries.get(entry.row.id))?.deleted_at).not.toBeNull();
     expect((await db.set_entries.toArray())[0]?.deleted_at).not.toBeNull();
+  });
+});
+
+describe("foreign-owner guards", () => {
+  const STAMP = "2026-10-14T00:00:00.000Z";
+
+  function foreignSession(): LocalRow<WorkoutSession> {
+    return {
+      id: "sess-other",
+      user_id: "other",
+      local_date: "2026-10-14",
+      started_at: null,
+      duration_min: null,
+      routine_id: null,
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  function foreignEntry(): LocalRow<ExerciseEntry> {
+    return {
+      id: "entry-other",
+      workout_id: "sess-other",
+      exercise_id: "exercise-1",
+      order_index: 0,
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  function foreignSet(): LocalRow<SetEntry> {
+    return {
+      id: "set-other",
+      exercise_entry_id: "entry-other",
+      set_index: 0,
+      weight_kg: 100,
+      reps: 5,
+      is_warmup: false,
+      e1rm_kg: e1rmBrzycki(100, 5),
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  function foreignExercise(): LocalRow<Exercise> {
+    return {
+      id: "ex-other",
+      owner_id: "other",
+      name: "Someone Else's Curl",
+      muscle_group: "biceps",
+      equipment: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  function foreignActivity(): LocalRow<Activity> {
+    return {
+      id: "act-other",
+      user_id: "other",
+      type: "cycling",
+      local_date: "2026-10-14",
+      started_at: null,
+      duration_min: null,
+      distance_km: 10,
+      elevation_m: null,
+      climb_grade: null,
+      climb_grade_value: null,
+      routes_sent: null,
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  function foreignBody(): LocalRow<BodyStats> {
+    return {
+      id: "body-other",
+      user_id: "other",
+      local_date: "2026-10-14",
+      weight_kg: 80,
+      bodyfat_pct: null,
+      neck_cm: null,
+      shoulders_cm: null,
+      chest_cm: null,
+      bicep_cm: null,
+      waist_cm: null,
+      hips_cm: null,
+      thigh_cm: null,
+      calf_cm: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
+  it("refuses to update or delete a custom exercise owned by another account", async () => {
+    const { db, repos } = harness("foreign-exercise");
+    await db.exercises.put(foreignExercise());
+
+    await expect(
+      repos.exercises.updateCustom("ex-other", { name: "Hijacked" }),
+    ).rejects.toThrow(LocalValidationError);
+    await expect(repos.exercises.softDelete("ex-other")).rejects.toThrow(LocalValidationError);
+
+    expect(await db.exercises.get("ex-other")).toEqual(foreignExercise());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses to update or delete a session owned by another account", async () => {
+    const { db, repos } = harness("foreign-session");
+    await db.workout_sessions.put(foreignSession());
+
+    await expect(repos.workouts.update("sess-other", { notes: "hijacked" })).rejects.toThrow(
+      LocalValidationError,
+    );
+    await expect(repos.workouts.remove("sess-other")).rejects.toThrow(LocalValidationError);
+
+    expect(await db.workout_sessions.get("sess-other")).toEqual(foreignSession());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses entry mutations and entry creation under a foreign session", async () => {
+    const { db, repos } = harness("foreign-entry");
+    await db.workout_sessions.put(foreignSession());
+    await db.exercise_entries.put(foreignEntry());
+
+    await expect(
+      repos.workouts.updateEntry("entry-other", { notes: "hijacked" }),
+    ).rejects.toThrow(LocalValidationError);
+    await expect(repos.workouts.removeEntry("entry-other")).rejects.toThrow(LocalValidationError);
+    await expect(
+      repos.workouts.addEntry({
+        workout_id: "sess-other",
+        exercise_id: "exercise-1",
+        order_index: 0,
+      }),
+    ).rejects.toThrow(LocalValidationError);
+
+    expect(await db.exercise_entries.get("entry-other")).toEqual(foreignEntry());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses set mutations and set creation under a foreign entry", async () => {
+    const { db, repos } = harness("foreign-set");
+    await db.workout_sessions.put(foreignSession());
+    await db.exercise_entries.put(foreignEntry());
+    await db.set_entries.put(foreignSet());
+
+    await expect(repos.workouts.updateSet("set-other", { reps: 10 })).rejects.toThrow(
+      LocalValidationError,
+    );
+    await expect(repos.workouts.removeSet("set-other")).rejects.toThrow(LocalValidationError);
+    await expect(
+      repos.workouts.addSet({
+        exercise_entry_id: "entry-other",
+        set_index: 0,
+        weight_kg: 100,
+        reps: 5,
+      }),
+    ).rejects.toThrow(LocalValidationError);
+
+    expect(await db.set_entries.get("set-other")).toEqual(foreignSet());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses to update or delete an activity owned by another account", async () => {
+    const { db, repos } = harness("foreign-activity");
+    await db.activities.put(foreignActivity());
+
+    await expect(repos.activities.update("act-other", { notes: "hijacked" })).rejects.toThrow(
+      LocalValidationError,
+    );
+    await expect(repos.activities.remove("act-other")).rejects.toThrow(LocalValidationError);
+
+    expect(await db.activities.get("act-other")).toEqual(foreignActivity());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses to update or delete a body stat owned by another account", async () => {
+    const { db, repos } = harness("foreign-body");
+    await db.body_stats.put(foreignBody());
+
+    await expect(
+      repos.body.upsertBodyStat({ local_date: "2026-10-14", weight_kg: 71 }),
+    ).rejects.toThrow(LocalValidationError);
+    await expect(repos.body.remove("body-other")).rejects.toThrow(LocalValidationError);
+
+    expect(await db.body_stats.get("body-other")).toEqual(foreignBody());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("updates the current user's own live row when a foreign row shares the date", async () => {
+    const { db, repos } = harness("foreign-body-coexist");
+    // The foreign id sorts first, so an owner-unscoped lookup hits it first.
+    await db.body_stats.put({ ...foreignBody(), id: "body-a-other" });
+    const own: LocalRow<BodyStats> = {
+      ...foreignBody(),
+      id: "body-z-own",
+      user_id: "user-1",
+      weight_kg: 70,
+    };
+    await db.body_stats.put(own);
+
+    const { row, op } = await repos.body.upsertBodyStat({
+      local_date: "2026-10-14",
+      weight_kg: 71,
+    });
+
+    expect(row.id).toBe("body-z-own");
+    expect(row.user_id).toBe("user-1");
+    expect(row.weight_kg).toBe(71);
+    expect(op.action).toBe("update");
+    expect(await db.body_stats.get("body-z-own")).toEqual(row);
+    // The foreign live row on the same date is left untouched.
+    expect(await db.body_stats.get("body-a-other")).toEqual({
+      ...foreignBody(),
+      id: "body-a-other",
+    });
   });
 });
 

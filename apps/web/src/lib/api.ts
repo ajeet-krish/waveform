@@ -55,6 +55,13 @@ export class ApiError extends Error {
 /** The fetch shape the client needs; tests inject a stub. */
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * How long one request may take from dispatch to a fully parsed body
+ * before its AbortController fires. Without a deadline a hung socket
+ * would keep the sync engine waiting forever.
+ */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
 /** Normalizes a configured base URL: trim, drop trailing slashes. */
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
@@ -136,6 +143,8 @@ export type ApiClientOptions = {
   fetchFn?: FetchFn;
   /** Called once per 401 before the ApiError is thrown. */
   onAuthExpired?: () => void;
+  /** Per-request deadline in milliseconds; defaults to REQUEST_TIMEOUT_MS. */
+  timeoutMs?: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -182,6 +191,7 @@ function transportError(cause: unknown): ApiError {
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const fetchFn: FetchFn = options.fetchFn ?? ((url, init) => globalThis.fetch(url, init));
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
   async function send<T>(
     path: string,
@@ -197,47 +207,61 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       headers["Content-Type"] = "application/json";
       payload = JSON.stringify(body);
     }
-    const init: RequestInit = { method, headers };
+    const controller = new AbortController();
+    const init: RequestInit = { method, headers, signal: controller.signal };
     if (payload !== undefined) {
       init.body = payload;
     }
+    // The deadline stays armed past the headers so a body that hangs
+    // mid-read aborts too; the finally below clears it once the body has
+    // settled (parsed, unreadable, or aborted).
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    let response: Response;
     try {
-      response = await fetchFn(`${baseUrl}${path}`, init);
-    } catch (cause) {
-      throw transportError(cause);
-    }
+      let response: Response;
+      try {
+        response = await fetchFn(`${baseUrl}${path}`, init);
+      } catch (cause) {
+        throw transportError(cause);
+      }
 
-    if (response.status === 401) {
-      options.onAuthExpired?.();
-      const envelope = await readEnvelope(response);
-      throw new ApiError("auth-expired", envelope?.message ?? "Your session has expired.", {
-        status: 401,
-        code: envelope?.code ?? null,
-      });
-    }
+      if (response.status === 401) {
+        options.onAuthExpired?.();
+        const envelope = await readEnvelope(response);
+        throw new ApiError("auth-expired", envelope?.message ?? "Your session has expired.", {
+          status: 401,
+          code: envelope?.code ?? null,
+        });
+      }
 
-    if (!response.ok) {
-      const envelope = await readEnvelope(response);
-      const kind: ApiFailureKind = response.status >= 500 ? "server" : "client";
-      throw new ApiError(kind, envelope?.message ?? `The server answered HTTP ${response.status}.`, {
-        status: response.status,
-        code: envelope?.code ?? null,
-      });
-    }
+      if (!response.ok) {
+        const envelope = await readEnvelope(response);
+        const kind: ApiFailureKind = response.status >= 500 ? "server" : "client";
+        throw new ApiError(kind, envelope?.message ?? `The server answered HTTP ${response.status}.`, {
+          status: response.status,
+          code: envelope?.code ?? null,
+        });
+      }
 
-    // logout answers 204 with no body; anything else must parse as JSON.
-    if (response.status === 204) {
-      return undefined;
-    }
-    try {
-      return (await response.json()) as T;
-    } catch (cause) {
-      throw new ApiError("server", "The server answered with an unreadable body.", {
-        status: response.status,
-        cause,
-      });
+      // logout answers 204 with no body; anything else must parse as JSON.
+      if (response.status === 204) {
+        return undefined;
+      }
+      try {
+        return (await response.json()) as T;
+      } catch (cause) {
+        // An abort that lands while the body is read is a timeout, not a
+        // malformed body; anything else is the server's unreadable body.
+        if (controller.signal.aborted) {
+          throw transportError(cause);
+        }
+        throw new ApiError("server", "The server answered with an unreadable body.", {
+          status: response.status,
+          cause,
+        });
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
