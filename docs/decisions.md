@@ -470,3 +470,71 @@ limit are acceptable for a friend group.
   failure counter keyed off `X-Forwarded-For` (trusted only behind the platform proxy)
   would cap what one source can do to one victim, and a DB-backed `login_attempts` table
   would survive restarts and serve multiple instances.
+
+## 2026-10-16 - Phase 2 bucket 3: Client sync engine (single flight, compaction, quarantine, per-entity cursors, adoption) [LOCKED]
+
+**Status: LOCKED. Client half of the Phase 1 outbox shape and the bucket 1 server sync
+engine; the sign-in surface rides the 2026-10-15 email + password auth ADR.**
+
+**Context**: The server can now accept pushes and serve cursor pages (bucket 1), and the
+browser can create sessions (bucket 2), but nothing joined them: the Phase 1 outbox only
+grew, pull cursors were never walked, and every local row carried a made-up user id the
+server would never recognize. The loop that closes this must stay honest under a flaky
+phone network (queue never drops a write, retries never stampede), must not push data the
+user chose to discard on first sign-in, and must keep working with no account at all.
+
+**Decision**:
+- **Single-flight runs**: one run at a time, `compactOutbox` (once) then `drainOutbox` to
+  empty in `maxOpsPerPush` batches then `pullAll`. `requestSync(reason)` joins an in-flight
+  run and queues exactly one follow-up round under the newest trigger's reason, so a burst
+  of triggers collapses to at most one extra pass. Triggers: bootstrap on `start()` while
+  signed in, a 2 s debounce on `subscribeOutboxWrites`, `window online`,
+  `visibilitychange` to visible, and a manual sync. Transport failures set "offline" and
+  back off exponentially (1 s base, x2, 5 minute cap, reset on success) on injectable
+  timers; a 401 sets "auth-expired" and halts the engine; a run still in flight after 2 s
+  reads as "waking" so a cold free-tier wake looks alive instead of frozen.
+- **Outbox compaction**: the first run after this lands compacts the Phase 1 queue once
+  (flagged in the same transaction as the deletions), keeping only the newest op per
+  `(entity, id)` in drain order. Without a server, that queue may hold dozens of edits to
+  one row where only the newest matters.
+- **Quarantine stays authoritative**: an op the server rejects three times is parked
+  (`quarantined`, stored, excluded from pending) so one poisoned row cannot wedge the
+  queue. The engine surfaces parked counts on the Account screen and the chip; requeueing
+  parked ops is a later pass.
+- **Per-entity cursors**: `pullAll` resumes each of the six entities from
+  `pull_cursor:{entity}`, parents first, persisting each page's merges and its next cursor
+  in one IndexedDB transaction; a completed tip stamps `last_synced_at`. Merges are
+  last-write-wins on `updated_at`; a winner drops the queued ops it supersedes into the
+  capped `conflict_log` so conflicts stay observable. Pull errors are read through a
+  watching wrapper because `pullAll` folds ApiErrors into `complete: false`.
+- **Adoption**: first sign-in asks "Upload my existing local data" (default; rewrites
+  `owner_id`/`user_id`, outbox payloads, and re-keys `local_profile` onto the server id)
+  or "Start empty" (typed "empty" confirmation; wipes the synced stores, clears cursors,
+  re-seeds the catalog, pulls the account down fresh). Both stamp `adopted_user_id`; the
+  engine is gated until the choice lands, then the repos rebind via
+  `createRepos(db, { userId })` so later writes stamp the real owner.
+- **Address resolution**: `sync_meta` `api_base_url` override, then `VITE_API_BASE_URL`
+  (baked by the Pages workflow), then the localhost default; Account > Advanced can set or
+  clear the override at runtime.
+
+**Rationale**: Single flight with one queued round is the smallest structure that cannot
+race itself while still not losing a write that lands mid-run; exponential backoff with a
+hard cap keeps a dead network from hammering a free-tier instance, and the reset on
+success makes the schedule reflect the network as it is now. Compacting before the first
+push keeps the wire honest (one newest op per row) instead of replaying a year of local
+churn. Quarantining at three matches the server's reject semantics: retrying a rejected
+payload forever would only burn the push budget. Adoption must run before sync because the
+server force-writes owners from the bearer session: pushing first would resurrect exactly
+the rows "Start empty" exists to drop, and merging later would still leave this device's
+profile id disagreeing with its account.
+
+**Trade-offs**: The device shows "local only" until the first-sign-in choice is answered
+(accepted: correctness of "Start empty" beats a silent auto-upload, and the prompt is one
+tap for the default). Backoff is per-device with no jitter (accepted at one device per
+person; a shared schedule would matter for many devices on one account). Quarantined ops
+park indefinitely with no requeue UI yet (accepted for bucket 3; the count is visible and
+a review pass is listed as follow-up). The conflict log is capped at 200 entries and is
+observability, not history (accepted: LWW means a dropped op is already resolved). The
+engine's count refresh defers a macrotask past Dexie's write transaction rather than
+joining it (accepted: a 0 ms hop keeps `sync_meta` reads in scope without restructuring
+the hook).

@@ -1,5 +1,6 @@
 import { Navigate, Route, Router } from "@solidjs/router";
 import Shell from "./components/Shell";
+import Account from "./routes/Account";
 import Activities from "./routes/Activities";
 import Body from "./routes/Body";
 import Climbing from "./routes/Climbing";
@@ -12,7 +13,6 @@ import Heatmap from "./routes/Heatmap";
 import History from "./routes/History";
 import HistoryDetail from "./routes/HistoryDetail";
 import Leaderboard from "./routes/Leaderboard";
-import Login from "./routes/Login";
 import NotFound from "./routes/NotFound";
 import Profile from "./routes/Profile";
 import Setup from "./routes/Setup";
@@ -45,7 +45,8 @@ export default function App() {
         <Route path="/social/feed" component={Feed} />
       </Route>
       <Route path="/profile" component={Profile} />
-      <Route path="/login" component={Login} />
+      <Route path="/account" component={Account} />
+      <Route path="/login" component={() => <Navigate href="/account" />} />
       <Route path="*" component={NotFound} />
     </Router>
   );

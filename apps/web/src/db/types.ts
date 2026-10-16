@@ -73,6 +73,12 @@ export type OutboxOp<E extends OutboxEntity = OutboxEntity> = {
   payload: OutboxRowMap[E];
   updated_at: string;
   created_at: string;
+  /** Push attempts recorded by markOutboxFailed; absent while healthy. */
+  attempts?: number;
+  /** Last server or transport error recorded for the op, if any. */
+  last_error?: string | null;
+  /** True once attempts reached 3; excluded from the pending queue. */
+  quarantined?: boolean;
 };
 
 /** The signed-in user's local profile row (single row per device). */

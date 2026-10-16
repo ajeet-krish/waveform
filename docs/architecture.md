@@ -1,6 +1,6 @@
 # Waveform Architecture
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 ## Decision Status
 
@@ -10,7 +10,9 @@ vanilla-JS PWA is replaced; its domain conventions survive, its code does not.
 Phase 1 shipped as a **local-first, single-user client**: the app runs entirely on IndexedDB
 (via Dexie) with no backend in the request path. The Rust API, the Postgres schema, auth, and the
 `sync` crate are in the repo from Phase 0 but are **deferred**: sync push/pull is Phase 2. See
-Deployment.
+Deployment. Bucket 3 (2026-10-16) closes that gap from the client side: while signed out the
+contract above still holds and nothing leaves the device; signing in starts the sync engine
+(see Phase 2 Client Sync below), which drains the same outbox against the API.
 
 Locked stack: SolidJS + Vite PWA frontend, Rust (Axum + SQLx) API, Postgres, offline-first sync,
 Brzycki e1RM, Fork + PR workflow, bearer-token auth (email + password; the Phase 0
@@ -265,6 +267,53 @@ Authorization/Content-Type, no credentials, 600 s preflight cache). DB access li
 `InsertError::DuplicateEmail`, case-insensitive `find_user_by_email`, `find_user_by_id`,
 `create_session`, `find_user_by_session_token_hash`, `delete_session_by_token_hash`,
 `purge_expired_sessions`).
+
+## Phase 2 Client Sync (bucket 3, 2026-10-16)
+
+`apps/web/src/lib/sync/engine.ts` is the browser half of sync: `createSyncEngine(deps)`
+exposes `status` ("idle" | "syncing" | "offline" | "waking" | "auth-expired" | "error"),
+`pendingCount`, `quarantinedCount`, `lastSyncedAt`, `conflicts`, and
+`start()` / `stop()` / `requestSync(reason)`. One run is `compactOutbox` (once, behind its
+one-time flag), then `drainOutbox` to empty in `RULE_CONSTANTS.sync.maxOpsPerPush` batches,
+then `pullAll` across every entity cursor. `requestSync` is single flight: concurrent
+triggers join the in-flight promise and queue exactly one follow-up round, run under the
+newest trigger's reason, so a burst collapses instead of stampeding the free-tier API.
+Triggers are bootstrap (`start()` while signed in), a 2 s debounce on
+`subscribeOutboxWrites`, `window online`, `visibilitychange` when the page is visible, and
+the manual "Sync now". The post-write count refresh hops one macrotask first because the
+Dexie `creating` hook runs inside the write's transaction, where `sync_meta` is out of
+scope. Failures back off exponentially (1 s base, x2, 5 minute cap, reset on success)
+through injectable timers; a 401 parks the engine on "auth-expired" and halts it; transport
+failures park it on "offline"; a run still in flight after 2 s reads as "waking". Pull
+failures are observed through a watching wrapper because `pullAll` folds ApiErrors into
+`complete: false`. Counts, `lastSyncedAt`, and the conflict-log length are recomputed from
+the outbox and `sync_meta` after every run and on every queued write.
+
+`lib/appData.tsx` owns the wiring: the auth store (bearer session in localStorage), base
+URL resolution (`sync_meta` `api_base_url` override, then `VITE_API_BASE_URL`, then the
+localhost default; `.github/workflows/pages.yml` bakes the deployed API address into the
+Pages build), the API client rebuilt whenever the address or token changes, and the engine
+bound to `auth.state() === "signed-in"`. `evaluateAuth` gates every transition: signed out
+stops the engine; signed in it waits out bootstrap (so the address override is settled
+first), reads `needsAdoption`, and only an adopted device rebinds the repos to the server
+user id (`createRepos(db, { userId })` wrapped in `guardRepos`) and starts a sync. Until
+then the Phase 1 contract holds: writes queue locally and the chip reads "local only". The
+account action surface is `account: { signup, login, logout, adoptionChoice, setApiBaseUrl }`
+next to `auth`, `adoptionNeeded`, `apiBaseUrlOverride`, `apiBaseUrl`, and `sync()`.
+
+`routes/Account.tsx` (registered at `/account`; `/login` now redirects there) carries the
+sign-up and sign-in forms, the signed-in session with sign out, the first-sign-in data
+choice ("Upload my existing local data" as the primary action, "Start empty" behind a
+ConfirmDialog demanding the typed phrase "empty", after which the catalog is re-seeded),
+the sync readout (state lamp, queued, paused, last synced, conflicts, Sync now), and the
+Advanced section that sets or clears the API address override. `components/CommandBar.tsx`
+turns the status chip into a link to `/account`; its label and lamp tone come from the pure
+`lib/sync/chip.ts::syncChip` ("sign in", "local only", "syncing", "offline", "sync error",
+"pending N", "synced"), which the Account readout restates so bar and panel always agree.
+Coverage: `lib/sync/engine.test.ts` (16 tests: single-flight coalescing, the outbox-write
+debounce, online and visibility triggers, the backoff schedule on injected timers,
+offline/auth-expired/waking transitions, quarantine and conflict surfacing), plus
+`chip.test.ts` and the `formatSyncStamp` cases in `format.test.ts`.
 
 ## Phase Plan
 

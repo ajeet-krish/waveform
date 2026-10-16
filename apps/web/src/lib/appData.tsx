@@ -8,10 +8,22 @@
  * rides along: repos are wrapped with guardRepos so quota failures
  * surface through storage().failure, and retryBootstrap reopens a log
  * that failed to open.
+ *
+ * Bucket 3 layers the account and sync surfaces on top without changing
+ * the local-first contract: while signed out, writes queue in the outbox
+ * and nothing leaves the device. The auth store keeps the bearer session
+ * in localStorage; the sync engine (single-flight, debounce, backoff)
+ * starts once a session exists and the first-sign-in data choice is
+ * answered, and stops on sign-out or a 401. The API base URL resolves
+ * sync_meta `api_base_url` override, then VITE_API_BASE_URL, then the
+ * localhost default. Before sign-in the repos stamp the local profile id
+ * onto new rows; after sign-in plus adoption they rebind to the server
+ * user id so later writes carry the owner the server expects.
  */
 
 import {
   createContext,
+  createEffect,
   createSignal,
   onCleanup,
   onMount,
@@ -19,8 +31,14 @@ import {
   type Accessor,
   type JSX,
 } from "solid-js";
+import type { LoginRequest, SignupRequest } from "@waveform/api-types";
 import { createRepos, db, ensureCatalog, LocalValidationError, type Repos } from "../db";
 import type { LocalProfile } from "../db/types";
+import { createApiClient, resolveApiBaseUrl, type ApiClient } from "./api";
+import { createAuthStore, readSession, type AuthStore } from "./session";
+import { adoptLocalUser, adoptStartEmpty, needsAdoption } from "./sync/adoption";
+import { createSyncEngine, type SyncStatus } from "./sync/engine";
+import { API_BASE_URL_KEY, getMeta, setMeta } from "./sync/meta";
 import {
   ensurePersistentStorage,
   guardRepos,
@@ -38,11 +56,45 @@ export type SetupInput = {
   lengthUnit: "cm" | "in";
 };
 
+/** What the first sign-in does with this device's pre-account data. */
+export type AdoptionChoice = "upload" | "start-empty";
+
 export type StorageView = {
   /** The latest quota or availability failure, or null when storage is healthy. */
   failure: Accessor<StorageFailure | null>;
   /** Asks the browser for persistent storage once; reports the outcome. */
   persist(): Promise<PersistState>;
+};
+
+/** The sign-in surface the Account screen drives. */
+export type AccountActions = {
+  signup(input: SignupRequest): Promise<void>;
+  login(input: LoginRequest): Promise<void>;
+  logout(): Promise<void>;
+  /**
+   * Answers the first-sign-in data choice: "upload" keeps the local log
+   * and rebases it onto the account, "start-empty" wipes the synced
+   * stores and pulls the account down fresh. Both then rebind the repos
+   * to the server user id and start the sync engine.
+   */
+  adoptionChoice(choice: AdoptionChoice): Promise<void>;
+  /**
+   * Sets the sync_meta `api_base_url` override ("" clears it), rebuilds
+   * the API client, and re-evaluates sync so a corrected address picks
+   * the engine back up.
+   */
+  setApiBaseUrl(raw: string): Promise<void>;
+};
+
+/** The sync engine's view for the chip and the Account status panel. */
+export type SyncView = {
+  status: Accessor<SyncStatus>;
+  pendingCount: Accessor<number>;
+  quarantinedCount: Accessor<number>;
+  lastSyncedAt: Accessor<string | null>;
+  conflicts: Accessor<number>;
+  /** Asks for one run now (the "Sync now" button). */
+  syncNow(): void;
 };
 
 export type AppData = {
@@ -63,6 +115,20 @@ export type AppData = {
   dismissStorageAlert(): void;
   /** Re-runs bootstrap, for a log that failed to open. */
   retryBootstrap(): Promise<void>;
+  /** Session state and the sign-in surface. */
+  auth: AuthStore;
+  account: AccountActions;
+  /**
+   * True when this device still owes the account its data choice, null
+   * while that check is in flight, false otherwise (signed out, already
+   * adopted, or just adopted).
+   */
+  adoptionNeeded: Accessor<boolean | null>;
+  /** The stored address override; null means the build's default. */
+  apiBaseUrlOverride: Accessor<string | null>;
+  /** The address sync uses right now; null when none resolves. */
+  apiBaseUrl: Accessor<string | null>;
+  sync(): SyncView;
 };
 
 const AppDataContext = createContext<AppData | null>(null);
@@ -88,9 +154,149 @@ export function AppDataProvider(props: { children: JSX.Element }) {
   const [profile, setProfile] = createSignal<LocalProfile | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [storageFailure, setStorageFailure] = createSignal<StorageFailure | null>(null);
+  const [apiOverride, setApiOverride] = createSignal<string | null>(null);
+  const [apiClient, setApiClient] = createSignal<ApiClient | null>(null);
+  const [adoptionNeeded, setAdoptionNeeded] = createSignal<boolean | null>(null);
 
   const unsubscribe = subscribeStorageFailures((failure) => setStorageFailure(failure));
   onCleanup(unsubscribe);
+
+  // Sign-in must not race the bootstrap read of the stored address
+  // override: the engine only starts once bootstrap has resolved it.
+  let markBootstrapReady!: () => void;
+  const bootstrapReady = new Promise<void>((resolve) => {
+    markBootstrapReady = resolve;
+  });
+
+  /** The configured address: override, then env, then localhost (throws if none). */
+  function currentBaseUrl(): string {
+    return resolveApiBaseUrl(apiOverride(), import.meta.env.VITE_API_BASE_URL ?? null);
+  }
+
+  /** The configured address when one resolves; null on a misconfigured host. */
+  function resolvedApiBaseUrl(): string | null {
+    try {
+      return currentBaseUrl();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Rebuilds the API client for the current address and session token. */
+  function refreshClient(): void {
+    try {
+      const client = createApiClient({
+        baseUrl: currentBaseUrl(),
+        token: readSession()?.token ?? null,
+        onAuthExpired: () => {
+          // A 401 during login is a wrong password, not a dead session:
+          // only a signed-in session can expire out from under the app.
+          if (auth.state() === "signed-in") {
+            auth.markExpired();
+          }
+        },
+      });
+      setApiClient(client);
+    } catch {
+      // No address configured (deployed without env and no override).
+      // Sign-in surfaces the resolve error through its own status
+      // region; sync simply has no client to run against.
+      setApiClient(null);
+    }
+  }
+
+  /** The client for an auth call; throws the resolver's message when none. */
+  function currentClient(): ApiClient {
+    const existing = apiClient();
+    if (existing !== null) {
+      return existing;
+    }
+    refreshClient();
+    const rebuilt = apiClient();
+    if (rebuilt !== null) {
+      return rebuilt;
+    }
+    throw new Error(
+      "No API address is configured: set one under Account, Advanced, before signing in.",
+    );
+  }
+
+  const auth: AuthStore = createAuthStore({
+    api: {
+      signup: (input) => currentClient().signup(input),
+      login: (input) => currentClient().login(input),
+      logout: async () => {
+        const client = apiClient();
+        if (client !== null) {
+          await client.logout();
+        }
+      },
+    },
+  });
+
+  const engine = createSyncEngine({
+    db,
+    api: () => (auth.state() === "signed-in" ? apiClient() : null),
+  });
+  onCleanup(() => engine.stop());
+
+  /** Latest evaluateAuth wins; a stale async check never binds or starts. */
+  let authEval = 0;
+
+  function bindRepos(userId: string): void {
+    setRepos(guardRepos(createRepos(db, { userId })));
+  }
+
+  /** Re-reads the profile row (adoption re-keys it to the server id). */
+  async function refreshProfile(): Promise<void> {
+    const rows = await db.local_profile.toArray();
+    const next = rows[0] ?? null;
+    if (next !== null) {
+      setProfile(next);
+    }
+  }
+
+  /**
+   * Reconciles session state with sync: signed out stops the engine,
+   * signed in checks the adoption marker (waiting out bootstrap so the
+   * address is settled first), and only an adopted device binds repos
+   * to the server user id and starts the engine.
+   */
+  async function evaluateAuth(): Promise<void> {
+    const token = ++authEval;
+    const state = auth.state();
+    const user = auth.user();
+    if (state !== "signed-in" || user === null) {
+      setAdoptionNeeded(false);
+      engine.stop();
+      return;
+    }
+    setAdoptionNeeded(null);
+    await bootstrapReady;
+    if (token !== authEval) {
+      return;
+    }
+    let needed: boolean;
+    try {
+      needed = await needsAdoption(db, user.id);
+    } catch {
+      // A local read failure must not strand a live session: sync runs
+      // anyway and the next auth change re-checks the marker.
+      needed = false;
+    }
+    if (token !== authEval) {
+      return;
+    }
+    setAdoptionNeeded(needed);
+    if (needed) {
+      // The data choice comes first: starting the engine here could push
+      // (or for "start-empty", resurrect) data the user is about to drop.
+      engine.stop();
+      return;
+    }
+    bindRepos(user.id);
+    void engine.start();
+  }
 
   async function bootstrap(): Promise<void> {
     if (!isIndexedDbAvailable()) {
@@ -98,16 +304,21 @@ export function AppDataProvider(props: { children: JSX.Element }) {
         "This browser is blocking local storage (IndexedDB), so the training log cannot open here.",
       );
       setStatus("error");
+      markBootstrapReady();
       return;
     }
     try {
+      const stored = await getMeta(db, API_BASE_URL_KEY);
+      if (typeof stored === "string" && stored.trim().length > 0) {
+        setApiOverride(stored.trim());
+      }
       await ensureCatalog(db);
-      const stored = await db.local_profile.toArray();
+      const rows = await db.local_profile.toArray();
       // A fast setup submit can finish first; never regress its outcome.
       if (status() !== "loading") {
         return;
       }
-      const existing = stored[0] ?? null;
+      const existing = rows[0] ?? null;
       if (!existing) {
         setStatus("setup");
         return;
@@ -121,6 +332,8 @@ export function AppDataProvider(props: { children: JSX.Element }) {
       }
       setError(messageOf(cause));
       setStatus("error");
+    } finally {
+      markBootstrapReady();
     }
   }
 
@@ -183,6 +396,89 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     setProfile(saved);
   }
 
+  async function adoptionChoice(choice: AdoptionChoice): Promise<void> {
+    const state = auth.state();
+    const user = auth.user();
+    if (state !== "signed-in" || user === null) {
+      throw new LocalValidationError("no signed-in account to adopt");
+    }
+    if (choice === "upload") {
+      await adoptLocalUser(db, user.id);
+    } else {
+      await adoptStartEmpty(db, user.id);
+      // The wipe also took the global catalog rows with it.
+      await ensureCatalog(db);
+    }
+    await refreshProfile();
+    setAdoptionNeeded(false);
+    bindRepos(user.id);
+    await engine.start();
+  }
+
+  async function setApiBaseUrl(raw: string): Promise<void> {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      await db.sync_meta.delete(API_BASE_URL_KEY);
+      setApiOverride(null);
+    } else {
+      let normalized: string;
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          throw new Error("unsupported scheme");
+        }
+        normalized = resolveApiBaseUrl(trimmed, null);
+      } catch {
+        throw new Error(
+          "Enter a full API address with http:// or https://, for example https://waveform-api-94et.onrender.com.",
+        );
+      }
+      await setMeta(db, API_BASE_URL_KEY, normalized);
+      setApiOverride(normalized);
+    }
+    refreshClient();
+    if (auth.state() === "signed-in") {
+      // Re-runs the adoption/start check, which restarts a halted
+      // engine (for example one parked on auth-expired by a typo'd
+      // address, or by the bad address the clear just removed) or
+      // simply syncs against the corrected one.
+      void evaluateAuth();
+    }
+  }
+
+  // The client follows the address and the session token. Created before
+  // the auth evaluation effect so a fresh sign-in always has its bearer
+  // token in place before the engine can start.
+  createEffect(() => {
+    apiOverride();
+    auth.state();
+    auth.user();
+    refreshClient();
+  });
+
+  createEffect(() => {
+    void evaluateAuth();
+  });
+
+  const account: AccountActions = {
+    signup: (input) => auth.signup(input),
+    login: (input) => auth.login(input),
+    logout: () => auth.logout(),
+    adoptionChoice,
+    setApiBaseUrl,
+  };
+
+  const syncView: SyncView = {
+    status: engine.status,
+    pendingCount: engine.pendingCount,
+    quarantinedCount: engine.quarantinedCount,
+    lastSyncedAt: engine.lastSyncedAt,
+    conflicts: engine.conflicts,
+    syncNow: () => {
+      void engine.requestSync("manual");
+    },
+  };
+
   const storageView: StorageView = {
     failure: storageFailure,
     persist: () => ensurePersistentStorage(),
@@ -202,6 +498,12 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     storage: () => storageView,
     dismissStorageAlert: () => setStorageFailure(null),
     retryBootstrap,
+    auth,
+    account,
+    adoptionNeeded,
+    apiBaseUrlOverride: apiOverride,
+    apiBaseUrl: resolvedApiBaseUrl,
+    sync: () => syncView,
   };
   return <AppDataContext.Provider value={value}>{props.children}</AppDataContext.Provider>;
 }

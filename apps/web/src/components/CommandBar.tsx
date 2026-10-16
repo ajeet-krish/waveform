@@ -2,10 +2,20 @@ import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
 import Icon from "./Icon";
 import Logo from "./Logo";
+import { useAppData } from "../lib/appData";
+import { syncChip } from "../lib/sync/chip";
 import { isActivePath, SECTIONS } from "../lib/nav";
 
 export default function CommandBar() {
   const location = useLocation();
+  const app = useAppData();
+  const chip = () =>
+    syncChip({
+      auth: app.auth.state(),
+      adoptionNeeded: app.adoptionNeeded(),
+      status: app.sync().status(),
+      pending: app.sync().pendingCount(),
+    });
   return (
     <header class="cmd">
       <A href="/" class="cmd-brand" aria-label="Waveform, go to the dashboard">
@@ -29,7 +39,14 @@ export default function CommandBar() {
         </For>
       </nav>
       <div class="cmd-status">
-        <span class="cmd-chip">local only</span>
+        <A
+          href="/account"
+          class="cmd-chip"
+          data-tone={chip().tone}
+          aria-label={`Sync status: ${chip().label}. Open account and sync settings.`}
+        >
+          {chip().label}
+        </A>
         <A href="/profile" class="cmd-profile" aria-label="Profile">
           <Icon name="user" />
         </A>

@@ -46,7 +46,15 @@ export {
   assertValidBodyStat,
 } from "./validation";
 export type { ActivityCheck, BodyStatCheck } from "./validation";
-export { buildOutboxOp, createOutboxRepo, type OutboxRepo } from "./outbox";
+export {
+  buildOutboxOp,
+  createOutboxRepo,
+  markOutboxFailed,
+  subscribeOutboxWrites,
+  watchOutboxWrites,
+  OUTBOX_QUARANTINE_ATTEMPTS,
+  type OutboxRepo,
+} from "./outbox";
 export type {
   ClimbSends,
   LocalProfile,

@@ -836,6 +836,58 @@ a.discipline:hover {
   background: var(--steady);
 }
 
+/* Account: the sync readout lamp and word, wearing the command chip's
+ * tone vocabulary: steady green means caught up, live magenta means
+ * moving right now, load amber means stopped or failing. */
+
+.sync-readout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.sync-readout-lamp {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--paper-faint);
+}
+
+.sync-readout-word {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper);
+}
+
+.sync-readout[data-tone="steady"] .sync-readout-lamp {
+  background: var(--steady);
+}
+
+.sync-readout[data-tone="steady"] .sync-readout-word {
+  color: var(--steady);
+}
+
+.sync-readout[data-tone="live"] .sync-readout-lamp {
+  background: var(--live);
+}
+
+.sync-readout[data-tone="live"] .sync-readout-word {
+  color: var(--live);
+}
+
+.sync-readout[data-tone="load"] .sync-readout-lamp {
+  background: var(--load);
+}
+
+.sync-readout[data-tone="load"] .sync-readout-word {
+  color: var(--load);
+}
+
 @media (min-width: 720px) {
   .panel-grid,
   .discipline-grid {

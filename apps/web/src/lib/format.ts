@@ -150,3 +150,19 @@ export function formatTime(iso: string): string {
   }
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
+
+/**
+ * "Today 09:30", "Yesterday 18:02", or "Monday 12 Oct 09:30": one stamp
+ * for the last-synced readout. Null (never synced) reads "Never" and an
+ * unparseable value reads "n/a", so the panel never shows Invalid Date.
+ */
+export function formatSyncStamp(iso: string | null, today: Date = new Date()): string {
+  if (iso === null || iso.length === 0) {
+    return "Never";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "n/a";
+  }
+  return `${formatDayHeading(localDateString(date), today)} ${formatTime(iso)}`;
+}

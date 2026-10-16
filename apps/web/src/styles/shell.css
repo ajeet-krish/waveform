@@ -82,6 +82,7 @@
   font-size: var(--text-2xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  text-decoration: none;
   color: var(--paper-faint);
 }
 
@@ -91,6 +92,37 @@
   height: 6px;
   border-radius: 999px;
   background: var(--paper-faint);
+}
+
+.cmd-chip:hover {
+  border-color: var(--paper-faint);
+  color: var(--paper);
+}
+
+/* The lamp follows the sync state: steady green when caught up, live
+ * magenta while moving, load amber when stopped or failing. */
+.cmd-chip[data-tone="steady"]::before {
+  background: var(--steady);
+}
+
+.cmd-chip[data-tone="steady"] {
+  color: var(--steady);
+}
+
+.cmd-chip[data-tone="live"]::before {
+  background: var(--live);
+}
+
+.cmd-chip[data-tone="live"] {
+  color: var(--live);
+}
+
+.cmd-chip[data-tone="load"]::before {
+  background: var(--load);
+}
+
+.cmd-chip[data-tone="load"] {
+  color: var(--load);
 }
 
 .cmd-profile {

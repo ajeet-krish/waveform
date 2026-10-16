@@ -3,6 +3,7 @@ import {
   formatDayHeading,
   formatDurationMin,
   formatE1rm,
+  formatSyncStamp,
   formatTime,
   formatWeight,
   localDateString,
@@ -95,6 +96,23 @@ describe("formatTime", () => {
 
   it("reads unparseable input as n/a", () => {
     expect(formatTime("not-a-timestamp")).toBe("n/a");
+  });
+});
+
+describe("formatSyncStamp", () => {
+  const today = new Date(2026, 9, 14, 15, 30);
+
+  it("reads never-synced and unparseable stamps without leaking Invalid Date", () => {
+    expect(formatSyncStamp(null)).toBe("Never");
+    expect(formatSyncStamp("")).toBe("Never");
+    expect(formatSyncStamp("not-a-timestamp")).toBe("n/a");
+  });
+
+  it("joins the day heading with the device-local time", () => {
+    const now = new Date(2026, 9, 14, 9, 30).toISOString();
+    const yesterday = new Date(2026, 9, 13, 18, 2).toISOString();
+    expect(formatSyncStamp(now, today)).toBe("Today 09:30");
+    expect(formatSyncStamp(yesterday, today)).toBe("Yesterday 18:02");
   });
 });
 

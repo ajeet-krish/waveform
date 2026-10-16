@@ -31,6 +31,7 @@ jobs:
         run: pnpm --filter @waveform/web run build
         env:
           VITE_BASE_PATH: /waveform/
+          VITE_API_BASE_URL: https://waveform-api-94et.onrender.com
       - name: Create SPA fallback
         run: cp apps/web/dist/index.html apps/web/dist/404.html
       - uses: actions/configure-pages@v5
