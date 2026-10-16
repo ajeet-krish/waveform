@@ -810,3 +810,55 @@ sign in on the same device over its lifetime. This elevates two findings above f
 - Finding 5 (repos compare owner to null only): a repo bound to one user can mutate another user's
   rows in the same IndexedDB, reachable through sign-out on a shared device. Guards must compare
   against `deps.userId`.
+
+## 2026-10-16 - Sync poll trigger (code review)
+
+Verdict: PASS WITH ISSUES (static analysis only: this review environment has no shell tool, so
+`git diff` and `npx pnpm@10 --filter @waveform/web test` could NOT run; both files were read in
+full and the timer and state machine traced by hand; four Low findings and two Info, none
+blocking)
+
+Scope: the uncommitted periodic poll trigger for the client sync engine: `apps/web/src/lib/sync/engine.ts`
+(SYNC_POLL_MS 30000 at 75, `pollMs` dep at 104, "poll" reason at 49, `clearPoll` at 258-263,
+`schedulePoll` at 306-315, halt clears the poll at 358, start arms it at 521, header docs at 13-19)
+and `apps/web/src/lib/sync/engine.test.ts` (fakeTimers poll tagging at 61-119, the new `pendingSync()`
+probe at 90-95, harness `pollMs`/`api` options at 152-155 and 183-194, six new "createSyncEngine
+poll" tests at 364-479). Scope taken from the task brief; without git the literal diff could not
+be confirmed. This review changed no production code.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1. Timer lifecycle (leak, double-arm, dropped ticks, clear paths) | PASS | `schedulePoll` (engine.ts:306-315) clears before arming and nulls the handle at tick start, so exactly one poll timer exists per running engine; the tick re-arms itself after the guard, so a tick that skips the run still re-arms and no cadence slot is dropped. `halt` clears the poll (358) and both `stop()` (526-532) and the auth-expired path (375-379) route through halt; `start()` arms only on the `!running` transition (511-522) and `schedulePoll` itself clears first, so restart cannot double-arm. One theoretical leak: the re-arm at 313 is unconditional, so a halt landing inside the tick's synchronous span (the `setStatus("syncing")` at 420 runs SolidJS reactions synchronously) would resurrect a timer that re-arms forever after stop; unreachable in today's appData wiring (no status reaction calls `stop()`), one-line fix row 1. |
+| 2. Backoff and auth-expired interplay | PASS | Traced every state. `idle` implies no backoff pending: the only path to idle clears backoff (368-373), and every failure parks status on "offline"/"error" (381) so the tick guard `status() === "idle"` (310) skips and only the backoff chain retries (275-291). "syncing" and "waking" also skip (test engine.test.ts:392-426 pins both). Auth-expired halts (375-379), which clears the poll timer (358), so nothing polls after a 401 (tests at 553-590 assert `pending()` empty, poll included). The poll never resets `backoffAttempt` (only "online" and success do) and can never start a run while a retry is armed. |
+| 3. Poll plus visibilitychange double-fire | PASS | A poll tick and a visibilitychange landing together collapse through single flight: the first caller starts the chain, the second joins `currentRun` and sets `rerunQueued` (462-469), costing one shared run plus exactly one follow-up round, the same burst semantics pinned by engine.test.ts:237-271. The tick guard also refuses to join a run whose status is "syncing"/"waking", so a slow run does not accumulate poll reruns. No stampede. Row 6 notes the millisecond-scale join window at the end of a run. |
+| 4. Signed out or `api() === null` | PASS | `performRun` early-returns after `recompute()` (404-407), the tick still re-arms (313) at the fixed pollMs cadence, so there is no spin, loop, or status churn: worst case is two IndexedDB reads every 30 seconds. `requestSync` resolves without running (458-460 covers the halted case). appData stops the engine on sign-out (appData.tsx:269-272), so a live-but-clientless engine is transient. Untested path, row 3. |
+| 5. Test quality of the six new tests | PASS with issues | All six prove their claims: "re-syncs on its own cadence" (365-375) and "re-arms after every tick" (377-390) pin the cadence and the self-reschedule; "does not sync while in flight" (392-426) gates the push, advances through both "syncing" and "waking" ticks, and holds pushes at 1; "stays parked while offline" (428-445) would see `runs()` climb past `runsSoFar` if the guard were bypassed (the stub records the exercises pull before rejecting, engine.test.ts:176-181, so a bypass run is observable); "skips while hidden" (447-464) proves the hidden skip and the visible fire; "cancels on stop" (466-478) asserts `pending()` empty, poll included, then advances three intervals with no run. `pendingSync()` is sound for today's delays but tags poll timers by `ms === pollMs` (73-75, 90-95), conflating delay with purpose: a future pollMs of 1000 or 2000 would silently hide real backoff, debounce, or waking timers from the probe (row 2, latent and real). Rows 4 and 5 are cheap strengthenings. |
+| 6. Regression and public shape | PASS | `SyncEngine` is unchanged (119-135); additions are strictly additive (`pollMs?` dep at 104, `SYNC_POLL_MS` at 75, "poll" in `SyncReason` at 49). Grep shows `SyncReason` is consumed only inside engine.ts, so no exhaustive switch breaks. Existing tests keep every prior assertion through `pendingSync()` (356, 488, 501-534, 550, 604, 631) and use `pending()` where poll inclusion is the point (473, 568, 589). Header docs updated to match (13-19). No em dashes or double hyphens in either file (grep; the one hit is "back-to-back"). |
+
+### Findings (FAIL items and non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low | apps/web/src/lib/sync/engine.ts:313 (with 420) | The tick re-arms unconditionally ("re-arms unconditionally" is even the header claim at 303-304). If `halt()` runs inside the tick's synchronous span, reachable only through a SolidJS reaction to `setStatus("syncing")` at 420 calling `stop()`, the re-arm at 313 creates a timer while `running` is false; that tick skips and re-arms again, so one perpetual no-op timer survives stop() forever. Unreachable in the current appData wiring, but it is exactly the leak class check 1 asks about. | Gate the re-arm on liveness: `if (running) schedulePoll();`, or early-return at the top of `schedulePoll` when `!running`. Amend the header sentence to "re-arms on every tick while the engine runs". |
+| Low | apps/web/src/lib/sync/engine.test.ts:73-75, 90-95 | `pendingSync()` identifies poll timers by `ms === pollMs`, conflating delay value with purpose. A future test with `pollMs: 1000` or `pollMs: 2000` would mis-tag backoff, debounce, or waking timers as poll and hide them from the probe, so assertions like `toEqual([1000])` would lie or fail confusingly. No current test collides (pollMs is 100 or 30000; backoff ladder 1000..300000; debounce and waking 2000), so nothing is wrong today; the risk is latent and real. | Tag by purpose, not delay: have `fakeTimers` throw when `pollMs` equals any configured sync delay, or split timer injection per purpose (a `pollTimeoutFn` seam), or at minimum assert non-collision in `harness()` and document the invariant. |
+| Low | apps/web/src/lib/sync/engine.test.ts:364-479 | Two gaps in the poll suite: no test drives a poll tick with `api() === null` (the `performRun` early-return at engine.ts:404-407 under reason "poll"), and no test shows a poll tick plus a visibilitychange in the same window collapsing to one shared run plus one reround (the generic burst test covers the mechanics but not this pairing). | Add `harness({ api: null })` + `advance(SYNC_POLL_MS)` asserting runs 0, status "idle", and no non-poll timers; optionally fire `visibility.fire("visibilitychange")` with one poll tick and assert exactly two runs. |
+| Low | apps/web/src/lib/sync/engine.test.ts:428-445 | "stays parked while offline" proves no new run and a stable status but never pins that the backoff timer survives the ticks untouched. A regression that clobbers the retry while skipping the run would pass. | After the two advances, add `expect(h.timers.pendingSync()).toEqual([1000])`, and optionally advance 1000 to observe the one backoff retry. |
+| Info | apps/web/src/lib/sync/engine.test.ts:204-205 (relied on at 436-443) | `runs()` counts runs that reached pullAll's exercises request including those failing there (the stub records the entity before invoking the handler at 176-181, which the offline test depends on). The comment "Completed non-aborted runs" overstates this. | Reword to "runs that reached pullAll, success or failure: every run asks for exercises first". |
+| Info | apps/web/src/lib/sync/engine.ts:310, 455, 462-469 | A tick landing while status is "idle" but a chain is still inside its post-outcome `recompute()` tail joins that chain and queues one extra full round that mostly duplicates the round just finished. Bounded by single flight and rare (a milliseconds-scale window every 30 s), so acceptable as is. | Optional: ignore a "poll" join while the chain is in its tail, or leave it and rely on the round cap. |
+
+### Verification Checklist
+
+- [x] All six requested checks PASS; findings above are four Low and two Info, no FAIL rows
+- [ ] Command gates NOT RUN: no shell tool in this review environment, so `git diff` and `npx pnpm@10 --filter @waveform/web test` could not execute; static analysis of both full files plus grep cross-checks only. Recommend a green `pnpm test --filter @waveform/web` before merge.
+- [x] No critical issues found (no Critical, High, or Medium)
+- [x] Code follows project conventions (strict TS, no `any`, SCREAMING_SNAKE consts, snake_case locals, PascalCase types, K&R braces)
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation (grep clean in both files; the single hit is the hyphenated "back-to-back")
+- [x] Phase code integrates cleanly with prior phases (poll is additive; single flight, backoff, halt semantics, and the public SyncEngine shape unchanged; existing tests preserved through the `pendingSync()` probe)
+
+### Recurring patterns for other agents
+
+- A self-rescheduling timer must re-arm under the same liveness condition as its work. Gate the re-arm on the running flag (or re-check inside the scheduler) so a halt landing mid-tick cannot resurrect the timer after stop.
+- Test fakes that classify timers by delay value conflate purpose with duration. Tag timers by call site or purpose, or fail fast on collision, so a later configuration change cannot silently hide a timer from a probe.
+- A periodic trigger that must not fight backoff should gate on the state signal (status "idle"), not on absence of work, and the halt path must own the timer cleanup. Verify with one test per parked state: offline, error, waking, hidden, auth-expired.

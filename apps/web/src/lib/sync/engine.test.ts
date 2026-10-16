@@ -6,8 +6,13 @@ import type { LocalRow, OutboxOp } from "../../db/types";
 import type { WorkoutSession as WireWorkout } from "@waveform/api-types";
 import { ApiError, type PullParams } from "../api";
 import {
+  SYNC_BACKOFF_BASE_MS,
+  SYNC_BACKOFF_CAP_MS,
+  SYNC_BACKOFF_FACTOR,
   SYNC_DEBOUNCE_MS,
   SYNC_MAX_ROUNDS,
+  SYNC_POLL_MS,
+  SYNC_WAKING_MS,
   createSyncEngine,
   type SyncApi,
   type SyncEngine,
@@ -56,26 +61,41 @@ function op(id: string, created_at: string, op_id: string): OutboxOp {
   };
 }
 
-/** Hand-rolled timers so backoff, debounce, and waking delays are probes. */
-function fakeTimers() {
+/** Hand-rolled timers so backoff, debounce, waking, and poll delays are probes. */
+function fakeTimers(pollMs: number = SYNC_POLL_MS) {
   let nextId = 1;
   let now = 0;
   const scheduled = new Map<number, { at: number; fn: () => void }>();
+  // Poll timers are always armed while live, so the sync-timer probes
+  // below exclude them to stay focused on backoff, debounce, and waking.
+  const pollIds = new Set<number>();
   return {
     setTimeoutFn(fn: () => void, ms: number): SyncTimerHandle {
       const id = nextId;
       nextId += 1;
       scheduled.set(id, { at: now + ms, fn });
+      if (ms === pollMs) {
+        pollIds.add(id);
+      }
       return id as unknown as SyncTimerHandle;
     },
     clearTimeoutFn(handle: SyncTimerHandle): void {
-      scheduled.delete(handle as unknown as number);
+      const id = handle as unknown as number;
+      scheduled.delete(id);
+      pollIds.delete(id);
     },
-    /** Live delays in ms, soonest first: the backoff probe between runs. */
+    /** Live delays in ms, soonest first, including the poll. */
     pending(): number[] {
-      return [...scheduled.values()]
-        .sort((a, b) => a.at - b.at)
-        .map((task) => task.at - now);
+      return [...scheduled.entries()]
+        .sort((a, b) => a[1].at - b[1].at)
+        .map(([, task]) => task.at - now);
+    },
+    /** Live delays in ms, soonest first, excluding the periodic poll. */
+    pendingSync(): number[] {
+      return [...scheduled.entries()]
+        .filter(([id]) => !pollIds.has(id))
+        .sort((a, b) => a[1].at - b[1].at)
+        .map(([, task]) => task.at - now);
     },
     /** Fires every timer due within ms, in due order, re-scanning as they schedule. */
     advance(ms: number): void {
@@ -93,6 +113,7 @@ function fakeTimers() {
           break;
         }
         scheduled.delete(dueId);
+        pollIds.delete(dueId);
         now = dueTask.at;
         dueTask.fn();
       }
@@ -128,20 +149,43 @@ function applied(ops: PushOp[]): PushResponse {
   return { results: ops.map((o) => ({ op_id: o.op_id, status: "applied" as const, error: null })) };
 }
 
+/**
+ * Every delay the engine uses for sync work (never the poll): the
+ * debounce, the waking probe, and the backoff ladder up to its cap.
+ * `pendingSync()` tells poll timers apart by delay alone, so a poll
+ * cadence equal to any of these would hide a real sync timer; harness()
+ * throws on that collision rather than let a probe silently lie.
+ */
+function syncDelays(): number[] {
+  const ladder: number[] = [];
+  for (let step = 0; step <= 20; step += 1) {
+    ladder.push(Math.min(SYNC_BACKOFF_BASE_MS * SYNC_BACKOFF_FACTOR ** step, SYNC_BACKOFF_CAP_MS));
+  }
+  return [SYNC_DEBOUNCE_MS, SYNC_WAKING_MS, ...ladder];
+}
+
 type HarnessOptions = {
   push?: PushHandler;
   pull?: PullHandler;
   isVisible?: () => boolean;
+  /** Overrides the poll cadence; defaults to the engine's SYNC_POLL_MS. */
+  pollMs?: number;
   /** null models the signed-out world: no client for the engine to call. */
   api?: SyncApi | null;
 };
 
 function harness(options: HarnessOptions = {}) {
+  const pollMs = options.pollMs ?? SYNC_POLL_MS;
+  if (syncDelays().includes(pollMs)) {
+    throw new Error(
+      `pollMs ${pollMs} collides with a sync delay, so pendingSync() would mis-tag it`,
+    );
+  }
   const db = createWaveformDb(`engine-${crypto.randomUUID()}`);
   openDbs.push(db);
   watchOutboxWrites(db);
 
-  const timers = fakeTimers();
+  const timers = fakeTimers(pollMs);
   const online = fakeTarget();
   const visibility = fakeTarget();
 
@@ -166,6 +210,7 @@ function harness(options: HarnessOptions = {}) {
   const engine = createSyncEngine({
     db,
     api: () => currentApi,
+    pollMs: options.pollMs,
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
     onlineTarget: online,
@@ -333,11 +378,154 @@ describe("createSyncEngine triggers", () => {
     expect(h.runs()).toBe(SYNC_MAX_ROUNDS);
 
     // The queued rerun was re-armed, not dropped: a timer is pending.
-    expect(h.timers.pending()).toEqual([SYNC_DEBOUNCE_MS]);
+    expect(h.timers.pendingSync()).toEqual([SYNC_DEBOUNCE_MS]);
 
     // Firing it earns the follow-up round the join asked for.
     h.timers.advance(SYNC_DEBOUNCE_MS);
     await waitFor(() => h.runs() > SYNC_MAX_ROUNDS);
+  });
+});
+
+describe("createSyncEngine poll", () => {
+  it("re-syncs on its own cadence while idle and visible", async () => {
+    const h = harness();
+    await h.engine.start();
+    await waitFor(() => h.runs() >= 1);
+    expect(h.runs()).toBe(1);
+
+    // Idle and visible with no local trigger: the poll runs anyway.
+    h.timers.advance(SYNC_POLL_MS);
+    await waitFor(() => h.runs() >= 2 && h.engine.status() === "idle");
+    expect(h.runs()).toBe(2);
+  });
+
+  it("re-arms after every tick so a later interval fires again", async () => {
+    const h = harness();
+    await h.engine.start();
+    await waitFor(() => h.runs() >= 1);
+
+    h.timers.advance(SYNC_POLL_MS);
+    await waitFor(() => h.runs() >= 2 && h.engine.status() === "idle");
+    expect(h.runs()).toBe(2);
+
+    // The tick re-armed the timer rather than firing once.
+    h.timers.advance(SYNC_POLL_MS);
+    await waitFor(() => h.runs() >= 3 && h.engine.status() === "idle");
+    expect(h.runs()).toBe(3);
+  });
+
+  it("does not sync while a run is in flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = harness({
+      pollMs: 100,
+      push: async (ops) => {
+        await gate;
+        return applied(ops);
+      },
+    });
+    await h.db.outbox.add(op("w1", "2026-10-01T00:00:00.000Z", "op-a"));
+
+    const started = h.engine.start();
+    await waitFor(() => h.pushes.length === 1);
+    expect(h.engine.status()).toBe("syncing");
+
+    // Ticks landing mid-push re-arm but start nothing.
+    h.timers.advance(100);
+    await settle();
+    expect(h.pushes).toHaveLength(1);
+    expect(h.engine.status()).toBe("syncing");
+
+    // "waking" is not "idle" either.
+    h.timers.advance(2000);
+    expect(h.engine.status()).toBe("waking");
+    h.timers.advance(100);
+    await settle();
+    expect(h.pushes).toHaveLength(1);
+
+    release();
+    await started;
+    expect(h.engine.status()).toBe("idle");
+  });
+
+  it("stays parked while offline instead of bypassing backoff", async () => {
+    const h = harness({
+      pollMs: 100,
+      pull: () => Promise.reject(new ApiError("offline", "gone")),
+    });
+    await h.engine.start();
+    expect(h.engine.status()).toBe("offline");
+    expect(h.timers.pendingSync()).toEqual([1000]);
+    const runsSoFar = h.runs();
+
+    // Poll ticks land well before the backoff retry is due: no run.
+    h.timers.advance(100);
+    await settle();
+    h.timers.advance(100);
+    await settle();
+    expect(h.runs()).toBe(runsSoFar);
+    expect(h.engine.status()).toBe("offline");
+    // Only the elapsed 200 ms moved the retry; the ticks neither
+    // cleared nor re-armed it, so its original 1000 ms due still stands.
+    expect(h.timers.pendingSync()).toEqual([800]);
+
+    // The retry still fires exactly once on its own schedule, not per tick.
+    h.timers.advance(800);
+    await waitFor(() => h.runs() > runsSoFar);
+    await settle();
+    expect(h.runs()).toBe(runsSoFar + 1);
+  });
+
+  it("re-arms while signed out and never runs without a client", async () => {
+    const h = harness({ api: null });
+    await h.engine.start();
+    expect(h.engine.status()).toBe("idle");
+    expect(h.runs()).toBe(0);
+    // The poll is armed even with no client to call.
+    expect(h.timers.pending()).toEqual([SYNC_POLL_MS]);
+
+    // The tick has no client to sync with, so it stays idle...
+    h.timers.advance(SYNC_POLL_MS);
+    await settle();
+    expect(h.runs()).toBe(0);
+    expect(h.engine.status()).toBe("idle");
+    // ...but it re-arms, so the next interval still fires.
+    expect(h.timers.pending()).toEqual([SYNC_POLL_MS]);
+  });
+
+  it("skips the sync while hidden and fires on the next visible tick", async () => {
+    let visible = false;
+    const h = harness({ isVisible: () => visible });
+    await h.engine.start();
+    await waitFor(() => h.runs() >= 1);
+    expect(h.runs()).toBe(1);
+
+    // Hidden: the tick re-arms without a run.
+    h.timers.advance(SYNC_POLL_MS);
+    await settle();
+    expect(h.runs()).toBe(1);
+    expect(h.engine.status()).toBe("idle");
+
+    visible = true;
+    h.timers.advance(SYNC_POLL_MS);
+    await waitFor(() => h.runs() >= 2);
+    expect(h.runs()).toBe(2);
+  });
+
+  it("cancels the poll on stop", async () => {
+    const h = harness();
+    await h.engine.start();
+    await waitFor(() => h.runs() >= 1);
+    expect(h.runs()).toBe(1);
+
+    h.engine.stop();
+    expect(h.timers.pending()).toEqual([]);
+
+    h.timers.advance(SYNC_POLL_MS * 3);
+    await settle();
+    expect(h.runs()).toBe(1);
   });
 });
 
@@ -348,7 +536,7 @@ describe("createSyncEngine backoff", () => {
     });
     await h.engine.start();
     expect(h.engine.status()).toBe("offline");
-    expect(h.timers.pending()).toEqual([1000]);
+    expect(h.timers.pendingSync()).toEqual([1000]);
 
     const scheduled = [
       2000, 4000, 8000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000, 300_000, 300_000,
@@ -359,9 +547,9 @@ describe("createSyncEngine backoff", () => {
       // The run in flight parks on "syncing" with its waking timer; the
       // probe waits for the failed run to settle and re-arm backoff.
       await waitFor(
-        () => h.engine.status() === "offline" && h.timers.pending().join() === String(next),
+        () => h.engine.status() === "offline" && h.timers.pendingSync().join() === String(next),
       );
-      expect(h.timers.pending()).toEqual([next]);
+      expect(h.timers.pendingSync()).toEqual([next]);
       delay = next;
     }
 
@@ -369,12 +557,12 @@ describe("createSyncEngine backoff", () => {
     h.setPull(undefined);
     h.timers.advance(delay);
     await waitFor(() => h.engine.status() === "idle");
-    expect(h.timers.pending()).toEqual([]);
+    expect(h.timers.pendingSync()).toEqual([]);
 
     h.setPull(() => Promise.reject(new ApiError("offline", "gone")));
     await h.engine.requestSync("manual");
     expect(h.engine.status()).toBe("offline");
-    expect(h.timers.pending()).toEqual([1000]);
+    expect(h.timers.pendingSync()).toEqual([1000]);
   });
 
   it("restarts the schedule at one second when the browser comes back online", async () => {
@@ -382,19 +570,19 @@ describe("createSyncEngine backoff", () => {
       pull: () => Promise.reject(new ApiError("offline", "gone")),
     });
     await h.engine.start();
-    expect(h.timers.pending()).toEqual([1000]);
+    expect(h.timers.pendingSync()).toEqual([1000]);
 
     h.timers.advance(1000);
     await waitFor(
-      () => h.engine.status() === "offline" && h.timers.pending().join() === "2000",
+      () => h.engine.status() === "offline" && h.timers.pendingSync().join() === "2000",
     );
-    expect(h.timers.pending()).toEqual([2000]);
+    expect(h.timers.pendingSync()).toEqual([2000]);
 
     h.online.fire("online");
     await waitFor(
-      () => h.engine.status() === "offline" && h.timers.pending().join() === "1000",
+      () => h.engine.status() === "offline" && h.timers.pendingSync().join() === "1000",
     );
-    expect(h.timers.pending()).toEqual([1000]);
+    expect(h.timers.pendingSync()).toEqual([1000]);
   });
 });
 
@@ -410,7 +598,7 @@ describe("createSyncEngine states", () => {
     expect(h.runs()).toBe(0);
     expect(await h.db.outbox.count()).toBe(1);
     expect(h.engine.pendingCount()).toBe(1);
-    expect(h.timers.pending()).toEqual([1000]);
+    expect(h.timers.pendingSync()).toEqual([1000]);
   });
 
   it("parks on auth-expired from push, stops, and recovers after a restart", async () => {
@@ -427,6 +615,7 @@ describe("createSyncEngine states", () => {
     // Stopped: manual requests resolve without running, writes arm nothing.
     await h.engine.requestSync("manual");
     expect(h.pushes).toHaveLength(pushesSoFar);
+    // Every timer, poll included, is gone once the engine halts.
     expect(h.timers.pending()).toEqual([]);
     await h.db.outbox.add(op("w2", "2026-10-02T00:00:00.000Z", "op-b"));
     h.timers.advance(10_000);
@@ -447,6 +636,7 @@ describe("createSyncEngine states", () => {
     });
     await h.engine.start();
     expect(h.engine.status()).toBe("auth-expired");
+    // Halted on the 401, poll included.
     expect(h.timers.pending()).toEqual([]);
   });
 
@@ -462,7 +652,7 @@ describe("createSyncEngine states", () => {
     });
     await failed.engine.start();
     expect(failed.engine.status()).toBe("error");
-    expect(failed.timers.pending()).toEqual([1000]);
+    expect(failed.timers.pendingSync()).toEqual([1000]);
   });
 
   it("reads a slow run as waking once two seconds pass", async () => {
@@ -489,7 +679,7 @@ describe("createSyncEngine states", () => {
     await started;
     expect(h.engine.status()).toBe("idle");
     // The waking timer was cleared with the run, not left to fire later.
-    expect(h.timers.pending()).toEqual([]);
+    expect(h.timers.pendingSync()).toEqual([]);
     expect(h.runs()).toBe(1);
   });
 

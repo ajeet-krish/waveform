@@ -1,6 +1,26 @@
 # Waveform Test Results
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
+
+## 2026-10-16 - Sync poll trigger hardening (Test note)
+
+The client sync engine (`apps/web/src/lib/sync/engine.ts`) now has a periodic poll trigger: an
+idle, visible engine re-syncs every `SYNC_POLL_MS` (30 s) so open devices converge on their own,
+and the poll tick re-arms only while the engine is running. This change also hardens the engine
+tests in `apps/web/src/lib/sync/engine.test.ts`: a new signed-out (`api: null`) test pins that the
+poll stays idle and re-arms with no client to call, the "stays parked while offline" test now
+pins that the backoff retry survives the poll ticks and then fires once, and the timer harness
+throws if a configured `pollMs` collides with a configured sync delay (debounce, waking, or the
+backoff ladder) so `pendingSync()` cannot silently mis-tag a timer.
+
+### Totals
+
+| Suite | Files | Tests | Notes |
+|-------|-------|-------|-------|
+| Web (`apps/web`) | 45 | 433 | vitest; +1 engine poll test from this change |
+
+`npx pnpm@10 --filter @waveform/web test`: 45 files, 433 passed, 0 failed.
+`npx pnpm@10 --filter @waveform/web lint`: `tsc -p tsconfig.json --noEmit`, clean.
 
 ## 2026-10-15 - Phase 2 bucket 2: Auth core and deploy readiness (Test inventory)
 

@@ -12,9 +12,12 @@
  *
  * Triggers: start() bootstraps a sync, outbox writes debounce for two
  * seconds, `online` and `visibilitychange` (when visible) fire at once,
- * and the UI can ask manually. A chain that reaches its round floor
- * with a rerun still queued re-arms the debounce instead of dropping
- * that trigger, so a write landing during the final round still syncs.
+ * a poll re-syncs an idle, visible engine every SYNC_POLL_MS so open
+ * devices converge on their own (it re-arms only while the engine is
+ * running), and the UI can ask manually. A chain
+ * that reaches its round floor with a rerun still queued re-arms the
+ * debounce instead of dropping that trigger, so a write landing during
+ * the final round still syncs.
  * Failures schedule an exponential backoff
  * (1s base, x2, 5 minute cap, reset on success) through injectable
  * timers; a 401 parks the engine on "auth-expired" and stops it; a
@@ -39,7 +42,14 @@ import { pullAll, type SyncPullApi } from "./pull";
 export type SyncStatus = "idle" | "syncing" | "offline" | "waking" | "auth-expired" | "error";
 
 /** Why a sync was requested; carried for observability and backoff policy. */
-export type SyncReason = "bootstrap" | "outbox" | "online" | "visibility" | "manual" | "backoff";
+export type SyncReason =
+  | "bootstrap"
+  | "outbox"
+  | "online"
+  | "visibility"
+  | "poll"
+  | "manual"
+  | "backoff";
 
 /** The outcome of one run after every failure kind is folded down. */
 type RunOutcome = "ok" | "offline" | "auth-expired" | "error";
@@ -58,6 +68,12 @@ export type SyncEventTargetLike = {
 
 /** Outbox writes settle for this long before a debounced run fires. */
 export const SYNC_DEBOUNCE_MS = 2000;
+
+/**
+ * How often an idle, visible engine proactively re-syncs while signed
+ * in, so open devices converge without a local trigger.
+ */
+export const SYNC_POLL_MS = 30000;
 
 /** A run still in flight after this long reads as "waking". */
 export const SYNC_WAKING_MS = 2000;
@@ -85,6 +101,8 @@ export type SyncEngineDeps = {
   api: Accessor<SyncApi | null>;
   debounceMs?: number;
   wakingMs?: number;
+  /** How often an idle, visible engine re-syncs; defaults to SYNC_POLL_MS. */
+  pollMs?: number;
   backoffBaseMs?: number;
   backoffFactor?: number;
   backoffCapMs?: number;
@@ -154,6 +172,7 @@ function defaultIsVisible(): boolean {
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const debounceMs = deps.debounceMs ?? SYNC_DEBOUNCE_MS;
   const wakingMs = deps.wakingMs ?? SYNC_WAKING_MS;
+  const pollMs = deps.pollMs ?? SYNC_POLL_MS;
   const backoffBaseMs = deps.backoffBaseMs ?? SYNC_BACKOFF_BASE_MS;
   const backoffFactor = deps.backoffFactor ?? SYNC_BACKOFF_FACTOR;
   const backoffCapMs = deps.backoffCapMs ?? SYNC_BACKOFF_CAP_MS;
@@ -183,6 +202,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let debounceTimer: SyncTimerHandle | null = null;
   let wakingTimer: SyncTimerHandle | null = null;
   let backoffTimer: SyncTimerHandle | null = null;
+  let pollTimer: SyncTimerHandle | null = null;
   let unsubscribeOutbox: (() => void) | null = null;
   /** True while a post-write count refresh waits for its macrotask. */
   let writeRefreshQueued = false;
@@ -236,6 +256,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }
   }
 
+  function clearPoll(): void {
+    if (pollTimer !== null) {
+      cancel(pollTimer);
+      pollTimer = null;
+    }
+  }
+
   function scheduleWaking(): void {
     clearWaking();
     wakingTimer = schedule(() => {
@@ -270,6 +297,25 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       debounceTimer = null;
       void requestSync(reason);
     }, debounceMs);
+  }
+
+  /**
+   * Re-arms the periodic poll. A tick only syncs an idle, visible
+   * engine, so it never fights backoff or stacks runs; it re-arms only
+   * while the engine is running, including a tick that skipped the run,
+   * so a halt landing mid-tick cannot revive the timer.
+   */
+  function schedulePoll(): void {
+    clearPoll();
+    pollTimer = schedule(() => {
+      pollTimer = null;
+      if (running && isVisible() && status() === "idle") {
+        void requestSync("poll");
+      }
+      if (running) {
+        schedulePoll();
+      }
+    }, pollMs);
   }
 
   /**
@@ -313,6 +359,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     clearDebounce();
     clearWaking();
     clearBackoff();
+    clearPoll();
     if (unsubscribeOutbox !== null) {
       unsubscribeOutbox();
       unsubscribeOutbox = null;
@@ -475,6 +522,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       onlineTarget?.addEventListener("online", handleOnline);
       visibilityTarget?.addEventListener("visibilitychange", handleVisibilityChange);
       void recompute();
+      schedulePoll();
     }
     return requestSync("bootstrap");
   }

@@ -279,8 +279,8 @@ then `pullAll` across every entity cursor. `requestSync` is single flight: concu
 triggers join the in-flight promise and queue exactly one follow-up round, run under the
 newest trigger's reason, so a burst collapses instead of stampeding the free-tier API.
 Triggers are bootstrap (`start()` while signed in), a 2 s debounce on
-`subscribeOutboxWrites`, `window online`, `visibilitychange` when the page is visible, and
-the manual "Sync now". The post-write count refresh hops one macrotask first because the
+`subscribeOutboxWrites`, `window online`, `visibilitychange` when the page is visible, a
+poll, and the manual "Sync now". The post-write count refresh hops one macrotask first because the
 Dexie `creating` hook runs inside the write's transaction, where `sync_meta` is out of
 scope. Failures back off exponentially (1 s base, x2, 5 minute cap, reset on success)
 through injectable timers; a 401 parks the engine on "auth-expired" and halts it; transport
