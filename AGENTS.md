@@ -63,7 +63,7 @@ Local infra:
 |-------|-------------|--------|
 | Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, GitHub Pages deploy | Complete |
 | Phase 1 Local-first training core | Workouts, exercises, body stats, climbing, cycling, dashboard, settings and backup (no backend) | Complete |
-| Phase 2 Backend + auth + sync | Auth core + deploy readiness done (bucket 2); sync push/pull, routines, remaining activities open | In progress |
+| Phase 2 Backend + auth + sync | Live API (Neon + Render), email and password auth, multi-device sync (buckets 1-3); routines and remaining activities open | In progress |
 | Phase 3 Social | Leaderboards, heatmap, feed, kudos | Not started |
 | Phase 4 Challenges + hardening | Challenges, hardening, backup and restore drill | Not started |
 
