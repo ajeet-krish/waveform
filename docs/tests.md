@@ -2,6 +2,64 @@
 
 Last updated: 2026-10-15
 
+## 2026-10-15 - Phase 2 bucket 2: Auth core and deploy readiness (Test inventory)
+
+Bucket 2 wired real email + password auth into the Axum API: signup, login, logout,
+`/auth/me`, HMAC-keyed bearer sessions, the in-memory login throttle, and exact-origin
+CORS. The suites below are new; the Phase 1 and Phase 0 entries that follow stay as
+history.
+
+### Totals
+
+| Suite | Files | Tests | Notes |
+|-------|-------|-------|-------|
+| waveform-api unit (`apps/api/src`) | 1 | 15 | auth primitives (RFC 4231 HMAC vectors, Argon2 round trip, DUMMY_PHC parse), limiter, bearer parsing, signup validation |
+| api `tests/auth_routes` (new, real Postgres) | 1 | 11 | the real router through `tower::oneshot`: signup/login/logout/me, CORS, throttling, error envelope |
+| db `tests/auth_queries` (new, real Postgres) | 1 | 6 | users and sessions queries: case-insensitive uniqueness and lookup, tombstones, expiry, purge |
+| Rust workspace (whole run) | - | 157 | 0 failed, 0 skipped with the compose Postgres |
+
+### Key guarantees fenced by tests
+
+- **No credential leakage**: `password_hash` never appears in the signup body, the login
+  body, or `/auth/me` (the `User` serde skip), asserted against real responses.
+- **Uniform login misses**: unknown email, wrong password, and NULL-hash accounts return
+  byte-identical 401 bodies (`invalid email or password`), so enumeration is not possible
+  through body or status.
+- **Duplicate email is 409**: a case-variant of a registered address answers 409 with
+  exactly "an account with that email already exists" (route test) and lands as
+  `InsertError::DuplicateEmail` on the `users_email_lower_key` index (query test).
+- **Session semantics**: the issued token resolves on `/auth/me`; expired sessions and
+  tombstoned users never resolve; logout is idempotent and revokes; the 30-day TTL comes
+  from `SESSION_TTL_DAYS`.
+- **Throttle contract**: 10 failures pass, the 11th attempt is 429, a success clears the
+  window (proven by 10 further 401s before the cap re-engages), keys normalize over case
+  and whitespace, and windows are independent per email.
+- **CORS**: preflight allows exactly `ALLOWED_WEB_ORIGIN` (methods, headers, and the
+  600 s max age asserted) and emits no `access-control-allow-origin` for any other
+  origin, on preflight and on regular responses.
+- **HMAC correctness**: `hash_token` is fenced by the RFC 4231 test vectors (short key,
+  exact-block key, over-block key), so the RFC 2104 construction over `sha2` cannot drift
+  silently.
+- **Malformed JSON** becomes the standard error envelope (`invalid_payload`, HTTP 422),
+  both for unparseable bodies and for missing required fields.
+
+### Commands run
+
+```sh
+docker compose -f infra/docker-compose.yml up -d postgres
+WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --check
+cargo test export_ts
+npx pnpm@10 lint ; npx pnpm@10 test ; npx pnpm@10 build
+```
+
+The two Postgres suites (`auth_queries`, `auth_routes`) share one scratch-database
+support module (`crates/db/tests/support/mod.rs`, reached by the api suite through a
+`#[path]` include): every test creates its own migrated throwaway database and drops it
+with `FORCE`, and without `WAVEFORM_TEST_DATABASE_URL` each test prints a skip notice and
+returns so `cargo test --workspace` stays green without infra.
+
 ## 2026-10-15 - Phase 1: Test Inventory (Tester agent)
 
 Phase 1 shipped the local-first client in four sub-phases (1a data core, 1b bootstrap and logger,

@@ -1,0 +1,21 @@
+# Keep the Docker build context lean and free of secrets: the Dockerfile
+# uses `COPY . .`, so everything not needed by the builder lands here.
+
+# VCS data and environment files (SESSION_SECRET lives in .env).
+.git
+.env
+.env.*
+
+# Build and dependency trees.
+target/
+node_modules/
+dist/
+.turbo/
+
+# Repo-local payload the builder never reads.
+docs/screenshots/
+legacy/
+
+# OS junk and logs.
+**/.DS_Store
+*.log

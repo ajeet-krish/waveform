@@ -1,3 +1,7 @@
+# SUPERSEDED by render.yaml (Phase 2 bucket 2, 2026-10-15): the API now
+# deploys to Render from the repo-root Dockerfile against Neon Postgres.
+# This file is kept only as the historical Railway service reference.
+
 # Railway service configuration for the API + Postgres deployment.
 # The web SPA is hosted separately on GitHub Pages.
 

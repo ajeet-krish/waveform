@@ -13,8 +13,10 @@ Phase 1 shipped as a **local-first, single-user client**: the app runs entirely 
 Deployment.
 
 Locked stack: SolidJS + Vite PWA frontend, Rust (Axum + SQLx) API, Postgres, offline-first sync,
-invite-only auth (OTP + GitHub OAuth), Brzycki e1RM, Fork + PR workflow. The web app deploys to
-GitHub Pages; the API and Postgres are deferred and run locally for development.
+Brzycki e1RM, Fork + PR workflow, bearer-token auth (email + password; the Phase 0
+invite-only OTP + GitHub OAuth design is superseded, see docs/decisions.md). The web app deploys
+to GitHub Pages; the API deploys to Render against Neon Postgres (bucket 2), and runs locally
+via Docker for development.
 
 ## Stack
 
@@ -55,7 +57,7 @@ waveform/
 │   │       ├── lib/            # pure view models + browser glue (backup, storage, forms)
 │   │       ├── routes/         # one file per screen
 │   │       └── components/     # Shell, panels, workout/activity/body widgets
-│   └── api/                    # Axum binary: routers, extractors, handlers (deferred)
+│   └── api/                    # Axum binary: routers, extractors, handlers (auth in bucket 2)
 ├── crates/
 │   ├── db/                     # SQLx pool, migrations runner, models (ts-rs), queries
 │   ├── analytics/              # port of fitness_control_center analytics.rs
@@ -66,7 +68,9 @@ waveform/
 │   ├── scoring/                # @waveform/scoring: TS scoring + shared golden vectors
 │   └── config/                 # shared tsconfig/eslint
 ├── migrations/                 # SQLx .sql (0001_init.sql, 0002_seed_catalog.sql, ...)
-├── infra/                      # docker-compose (Postgres + Mailpit), railway.toml, workflows
+├── infra/                      # docker-compose (Postgres + Mailpit), railway.toml (superseded)
+├── Dockerfile                  # multi-stage API image for Render
+├── render.yaml                 # Render web service: docker, free, pre-deploy migrate
 ├── scripts/                    # invite CLI (api subcommand), restore drill
 └── docs/                       # architecture.md, decisions.md, research.md, reviews.md, tests.md
 ```
@@ -196,6 +200,11 @@ offers a retry.
 
 ## Deferred Backend Design (Phase 2 target)
 
+**[SUPERSEDED 2026-10-15 for auth and hosting: auth is email + password with opaque bearer
+sessions (ADR 2026-10-15, "Email + password accounts" and the bucket 2 ADR below), and the
+API deploys to Render against Neon Postgres. The table list and the sync contract below
+still hold.]**
+
 Tables: `users`, `sessions`, `otp_codes`, `invites`, `groups`/`group_members`, `exercises`
 (global catalog plus per-user custom), `workout_sessions`, `exercise_entries`, `set_entries`
 (generated STORED `e1rm_kg`, Brzycki, CHECK reps 1..36), `activities` (type in
@@ -231,7 +240,31 @@ plain pull indexes on the three child tables, and converges global catalog ids o
 client's deterministic UUIDv5 (`waveform_uuidv5` / `waveform_catalog_id`, core Postgres
 only) with the FKs made deferrable initially immediate so children follow their parents in
 the same transaction. Auth is email + password with an opaque bearer token in the
-`Authorization` header (bucket 2 lands the handlers; bucket 1 ships the column and DTOs).
+`Authorization` header (bucket 1 shipped the column and DTOs; the handlers landed in
+bucket 2, below).
+
+## Phase 2 Auth Core (bucket 2, 2026-10-15)
+
+`apps/api` is now a library plus a thin binary: `lib.rs` exposes the modules and holds
+`run()` (serve path plus the `migrate` subcommand that only needs `DATABASE_URL`), and
+`main.rs` calls it. The auth surface (`routes/auth.rs`) is `POST /auth/signup` (open
+sign-up, validated against `RuleConstants`; Argon2id m=19456, t=3, p=1 hashed in
+`spawn_blocking`; duplicate email 409), `POST /auth/login` (throttled, one byte-identical
+401 for every miss, dummy-hash verification equalizes timing), `POST /auth/logout`
+(always 204, idempotent), and `GET /auth/me` (the `User` model, which never serializes
+`password_hash`). Sessions: 256-bit random token in `AuthResponse`, stored only as
+`HMAC-SHA256(token)` keyed by `SESSION_SECRET` (`auth.rs::hash_token`, RFC 2104 over
+`sha2`, RFC 4231 fenced), 30-day TTL; the `AuthUser` extractor (`extractors.rs`) resolves
+Bearer header to user via `find_user_by_session_token_hash` (non-expired session,
+non-tombstoned user) and answers 401 on any miss. Throttling is
+`rate_limit.rs::LoginLimiter` (in-memory, 10 failures per 15 minutes per normalized
+email, success clears, shared by login and signup). `routes/mod.rs` builds the router
+(healthz plus auth) under one exact-origin `CorsLayer` (GET/POST/OPTIONS,
+Authorization/Content-Type, no credentials, 600 s preflight cache). DB access lives in
+`crates/db/src/queries/auth.rs` (`create_user` classifying the email unique index as
+`InsertError::DuplicateEmail`, case-insensitive `find_user_by_email`, `find_user_by_id`,
+`create_session`, `find_user_by_session_token_hash`, `delete_session_by_token_hash`,
+`purge_expired_sessions`).
 
 ## Phase Plan
 
@@ -247,10 +280,27 @@ the same transaction. Auth is email + password with an opaque bearer token in th
 
 Web is a static SPA on GitHub Pages at the project site https://ajeet-krish.github.io/waveform/,
 built from `apps/web` and deployed by `.github/workflows/pages.yml`. The build sets Vite `base`
-to `/waveform/` and ships a `404.html` fallback, so client-side routes survive deep links. API +
-Postgres are deferred: Phase 1 runs entirely on local storage, so managed hosting is not needed
-yet. Development runs locally with Postgres and Mailpit via
-`docker compose -f infra/docker-compose.yml up -d` and the API on localhost:8080. When
-multi-device or group access is needed, add a free-tier managed Postgres (Neon or Supabase) and a
-free web-service tier (Render or Fly), with `infra/railway.toml` kept as the reference for the
-API service. CI gates: pnpm lint/test, cargo test, ts-rs drift check, sqlx migration check.
+to `/waveform/` and ships a `404.html` fallback, so client-side routes survive deep links.
+
+The API deploys to Render (free web service) from the repo-root `Dockerfile`: a multi-stage
+`rust:1-bookworm` builder compiling `-p waveform-api`, then a `debian:bookworm-slim` runtime
+with `ca-certificates`, `EXPOSE 8080`, and `CMD waveform-api` (the platform injects `PORT`).
+Postgres runs on Neon (free tier); `render.yaml` describes the service:
+
+- `runtime: docker`, `plan: free`, `healthCheckPath: /healthz`.
+- `preDeployCommand: waveform-api migrate` applies migrations as an explicit release step
+  before traffic shifts; the fallback start command, only needed if the image CMD is
+  overridden, is `startCommand: waveform-api` (documented as a comment in the file).
+- Environment: `DATABASE_URL` and `SESSION_SECRET` (`sync: false`, pasted into the Render
+  dashboard; generate the secret with `openssl rand -hex 32`), `ALLOWED_WEB_ORIGIN=https://ajeet-krish.github.io`,
+  `RUN_MIGRATIONS=false` (production never runs DDL on boot), and `RUST_LOG`.
+
+Auth sessions are bearer tokens, never cookies: the client stores the opaque token from
+`AuthResponse` and sends `Authorization: Bearer <token>`; the server stores only an
+HMAC-SHA256 keyed by `SESSION_SECRET` and rotates all sessions by rotating that secret.
+CORS allows exactly the GitHub Pages origin (GET, POST, OPTIONS; Authorization and
+Content-Type; no credentials). `infra/railway.toml` is superseded by `render.yaml` and kept
+only as history. Development runs locally with Postgres via
+`docker compose -f infra/docker-compose.yml up -d` (Mailpit stays in the compose file as
+inert Phase 0 residue) and the API on localhost:8080. CI gates: pnpm lint/test, cargo test,
+ts-rs drift check, sqlx migration check.

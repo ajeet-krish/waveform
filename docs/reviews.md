@@ -1,6 +1,6 @@
 # Waveform Reviews
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 ## 2026-10-14 - Phase 0: Foundation review (full-stack)
 
@@ -550,3 +550,69 @@ crates/db/tests/catalog_uuidv5.rs and the algorithm as traced through the SQL.
 - Parity fences should be three-legged like the UUIDv5 one (SQL, Rust, TS sharing golden vectors) so a drift on any side fails two suites; rule constants use the same pattern through export_ts_rules plus the vitest deep-equal.
 - Databases-level tests that execute migration files from disk (not through the embedded migrator) are how you prove re-entrancy and inspect intermediate states; keep the "one file per simple-query batch" assumption documented, since SET CONSTRAINTS depends on the implicit transaction.
 - Everything a payload could spoof (owner columns, updated_at, deleted_at, applied_at, generated columns) must be bound or stripped before the write; `jsonb_populate_record` plus an explicit select list is a clean way to keep column lists in lock step while ignoring hostile keys.
+
+## 2026-10-16 - Phase 2 bucket 2: auth core (code review)
+
+Verdict: PASS WITH ISSUES (static analysis; execution gates NOT RUN in this environment, list below; one docs-only FAIL row, check 4b, a Low that lands before commit)
+
+Scope: uncommitted Phase 2 bucket 2 change set (auth core + deploy readiness): new
+`apps/api/src/{lib,auth,extractors,rate_limit}.rs`, rewritten `apps/api/src/routes/auth.rs`,
+new `crates/db/src/queries/auth.rs`, new `crates/db/tests/{support/mod,auth_queries}.rs`, new
+`apps/api/tests/auth_routes.rs`, new `Dockerfile` and `render.yaml`; edited
+`apps/api/src/{main,state,error,routes/mod,config}.rs`, `crates/db/src/queries/mod.rs`,
+`Cargo.toml`s, `Cargo.lock`, `.env.example`, `infra/railway.toml`, `docs/*`, `AGENTS.md`.
+Product decision: email + password accounts, open sign-up, no OTP/MFA/email verification/OAuth;
+session = opaque 256-bit token in `AuthResponse` sent as `Authorization: Bearer`, DB stores
+HMAC-SHA256(SESSION_SECRET, token) hex, rotating `SESSION_SECRET` invalidates all sessions.
+IMPORTANT: this review environment has no shell tool, exactly like the 1b/1c/1d and bucket 1
+reviews: `git status`/`git diff` and every command gate could NOT be executed. Everything below
+is static analysis of the working tree.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1a. Argon2id parameters and PHC round-trip | PASS | auth.rs:15-21 pins m=19456, t=3, p=1, 32-byte output; `hash_password` (auth.rs:40-53) builds `Params` explicitly with `SaltString::generate(OsRng)`; round-trip and wrong-password rejection tested at auth.rs:181-190. `verify_password` (auth.rs:57-64) returns false on malformed PHC and never panics; verification uses the params embedded in the PHC string (empirically pinned: the round-trip test would fail under instance defaults), so DUMMY_PHC (auth.rs:36-37, same m/t/p) makes a miss cost one real verification. |
+| 1b. Byte-identical 401s, no login enumeration | PASS | One `INVALID_CREDENTIALS` constant (routes/auth.rs:44) and one code path (routes/auth.rs:114-129) for unknown email, wrong password, and NULL hash (DUMMY_PHC at routes/auth.rs:114-119). `every_login_miss_is_one_byte_identical_401` (auth_routes.rs:235-275) compares raw body bytes across all three. |
+| 1c. Validation vs RuleConstants | PASS | Password 10 (rules) to 1024 bytes (routes/auth.rs:38, 204; dto.rs:334), email 3 to 254 bytes with one `@`, dotted domain, no whitespace or double dots (routes/auth.rs:224-243), display name trimmed 1 to 60 chars (routes/auth.rs:212-217); boundaries unit-tested (routes/auth.rs:258-298). |
+| 1d. Case-insensitive uniqueness, race-safe insert | PASS | `lower(email) = lower($1)` lookups (queries/auth.rs:86-95) against `users_email_lower_key` (0003_hardening.sql:165); `create_user` has no pre-check and `classify_insert` (queries/auth.rs:50-61) maps unique violations on both email indexes to `DuplicateEmail` (409 at routes/auth.rs:83-88). Tested at auth_queries.rs:40-61 and auth_routes.rs:176-198. |
+| 2a. Token generation and HMAC | PASS | 32 OsRng bytes hex-encoded (auth.rs:66-72). `hmac_sha256` (auth.rs:84-113) verified line by line against RFC 2104: H(K) then zero-pad for keys over B=64, zero-pad otherwise, 0x36/0x5c pads, H(opad \|\| H(ipad \|\| m)); correct including the exactly-64-byte boundary. RFC 4231 cases 1, 2, 6 reproduced byte for byte (auth.rs:128-149). The hand-rolled deviation is recorded in the ADR (decisions.md:427-429) and vector-fenced; acceptable. |
+| 2b. Session lifecycle and secret hygiene | PASS | Lookup joins users, rejects expired and tombstoned rows (queries/auth.rs:129-145); logout deletes by hash, always 204, idempotent (routes/auth.rs:151-159; auth_routes.rs:319-350); TTL 30 days (auth.rs:30, routes/auth.rs:177); raw token only in `AuthResponse` (dto.rs:221-225); no token or hash logged (grep); `Session`/`OtpCode` not serializable (models.rs:56-75); `password_hash` serde+ts skipped (models.rs:31-33). |
+| 3. Extractors and error mapping | PASS | `bearer_token` (extractors.rs:56-63) rejects missing, wrong-scheme, multi-token; `AuthUser` 401s them all (extractors.rs:38-50; auth_routes.rs:353-383). `ApiJson` envelopes JSON rejections (extractors.rs:77-82; auth_routes.rs:509-543). Status mapping correct (error.rs:47-57); 500 bodies carry only generic literals (Info row 5). |
+| 4a. Rate limiter logic | PASS | 10 failures then lockout per 15-minute window keyed by trim-then-lowercase (rate_limit.rs:15-17, 92-94); success and signup clear (routes/auth.rs:92, 137); signup consults the limiter (routes/auth.rs:61-65); prune cap 10k keys (rate_limit.rs:21, 66-69); poisoned lock fails open (rate_limit.rs:49-54). Route 429 and reset tested (auth_routes.rs:386-423); unit tests at rate_limit.rs:102-146. |
+| 4b. Per-email lockout DoS assessed and documented | FAIL | An attacker can lock one address out of login and signup for up to 15 minutes with 10 failed attempts against it. Acceptable at friend-group scale, but documented nowhere: ADR trade-offs (decisions.md:460-465) cover only process-local reset and session rotation, and grep for DoS/denial/lockout across docs returns nothing. Low, docs-only fix below. |
+| 5. CORS | PASS | Exact single origin via `AllowOrigin::list` (routes/mod.rs:56-62), GET/POST/OPTIONS plus Authorization and Content-Type (routes/mod.rs:52-53), `allow_credentials(false)` explicit (routes/mod.rs:54), 600 s max age; wildcard or malformed origin fails closed (routes/mod.rs:60-68); foreign origins get no `access-control-allow-origin` header at all (auth_routes.rs:426-506). |
+| 6. Deploy artifacts | PASS | Dockerfile multi-stage, `cargo build --release -p waveform-api` (Dockerfile:25), binary-only copy into debian:bookworm-slim with ca-certificates (Dockerfile:27-31), `CMD ["waveform-api"]` (Dockerfile:36). render.yaml: `healthCheckPath: /healthz` (line 10), `preDeployCommand: waveform-api migrate` (line 13; migrate needs only DATABASE_URL, config.rs:74-76), `RUN_MIGRATIONS: "false"` (lines 30-31), no committed secrets (DATABASE_URL and SESSION_SECRET are `sync: false`, lines 20-25); railway.toml header-marked superseded (lines 1-3). Hardening notes in the findings table. |
+| 7. Models and ts-rs | PASS | `password_hash` `#[serde(skip)] #[ts(skip)]` (models.rs:31-33), absent from generated.ts `User` (generated.ts:297-302) and from signup/login/me bodies (auth_routes.rs:135-147, 216-219); DTO shapes match dto.rs:202-225 and generated.ts:49, 148, 276. Byte-identical `cargo test export_ts` regeneration NOT verifiable here; gate item 5. |
+| 8. Test genuineness | PASS | Identical 401s by raw byte comparison (auth_routes.rs:258-272), expired session via hand-inserted past expiry (auth_routes.rs:293-313), logout idempotence including no-token no-op (auth_routes.rs:333-347), 429 on the 11th failure plus reset proven by 10 fresh 401s (auth_routes.rs:395-420), CORS preflight allow and foreign deny (auth_routes.rs:432-484), malformed JSON and missing-field envelopes (auth_routes.rs:509-541); auth_queries covers collision, tombstones, round trip, expiry, purge scope (auth_queries.rs:39-240). Counts match docs/tests.md:16-18 (15 unit, 11 route, 6 query). Gap: signup throttle path untested at route level (Low row 4). |
+| 9. Conventions and cleanliness | PASS (git-dependent parts unverifiable) | 4-space K&R, snake_case/PascalCase/SCREAMING_SNAKE throughout; `unsafe_code = "forbid"` (Cargo.toml:44) and zero `unsafe` hits (grep); zero em or en dashes in the tree (grep), remaining `--` are command flags and table separators; HMAC deviation fenced per the ADR. "Migrations untouched", "no unintended edits", and export_ts drift are NOT verifiable without git and must be confirmed before commit. |
+
+### Findings (FAIL items and non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Low (the 4b FAIL) | docs/decisions.md:460-465; apps/api/src/rate_limit.rs:1-8 | Per-email lockout DoS undocumented: 10 failed attempts against `lower(trim(email))` on /auth/login or /auth/signup lock that address out of both endpoints for up to 15 minutes (routes/auth.rs:61-65, 103-107; failures recorded at routes/auth.rs:68, 84, 128). Acceptable at friend-group scale, but the ADR trade-offs paragraph does not say so. | Add one ADR trade-offs bullet: per-email lockout is a small targeted DoS (one address, 15 minutes), accepted at friend-group scale; revisit with per-IP limits or by not counting signup validation and duplicate probes if abuse appears. Mirror one sentence in the rate_limit.rs module doc. |
+| Low | Dockerfile:24 | No `.dockerignore`; `COPY . .` pulls `.env`, `.git`, `node_modules`, and `target` into the builder stage. The runtime image only receives the binary (Dockerfile:31), but `.env` lands in cached builder layers and builds are slow. | Add `.dockerignore` (`.git`, `node_modules`, `target`, `dist`, `.turbo`, `.env`, `.env.*`, `!.env.example`). |
+| Low | apps/api/src/config.rs:15 | `Config` derives `Debug`, formatting `session_secret` in clear text; a future `tracing::debug!(?config)` would leak the HMAC key. Nothing logs it today (lib.rs:48-52 logs origin and secret length only). | Drop `Debug` or hand-implement a redacting `Debug`. |
+| Low | apps/api/tests/auth_routes.rs (suite) vs routes/auth.rs:61-70, 83-88 | Signup throttle path has no route-level test: `is_limited` on signup (429) and `record_failure` on validation failure and `DuplicateEmail` are covered only by limiter unit tests. | Extend the rate-limit route test (or add one) with 10 failed signups then a 429 on /auth/signup. |
+| Info | apps/api/src/error.rs:87-99 | `ApiError::Internal(String)` returns its message in the 500 body; "details not leaked" holds only because all constructors use generic literals (error.rs:108, 122; routes/auth.rs:124, 135, 193, 197). | Return a fixed `"internal error"` body message for 500 and keep the variant string log-only. |
+| Info | apps/api/src/auth.rs:125-126; docs/tests.md:40-41 | RFC 4231 vector 2 is the 4-byte key "Jefe", not an "exact-block key" as both comments claim; the exactly-64-byte key boundary (the `>` test at auth.rs:88) is untested (vectors cover 20, 4, 131 byte keys). | Fix the comment; optionally add a 64-byte-key known-answer case. |
+| Info | apps/api/src/rate_limit.rs:16 | Window documented as "sliding" but implemented as fixed, anchored at the first failure (rollover only, rate_limit.rs:75-78); unlock is 15 minutes after the first failure, not the last. Gentler than sliding; behavior fine. | Rename to "fixed window", or slide `opened_at` per failure. |
+| Info | Dockerfile:19-25, 27-36 | `cargo fetch` downloads but does not compile, so the cache layer saves registry I/O only; deps recompile after `COPY . .`. Runtime container runs as root. | Optional: compile against placeholder sources in the cache layer; add `USER nobody` in the runtime stage. |
+| Info | routes/auth.rs:83-88 with open sign-up | Signup 409 for taken addresses makes account existence probeable at signup; inherent to open sign-up and specified in the ADR. Login enumeration properly closed; docs/tests.md:25-27 correctly scopes its claim to the 401 bodies. | None; keep "no enumeration" claims scoped to login. |
+
+### Verification Checklist
+
+- [x] All code checks passed (8 of 8 code checks PASS; check 4b FAILs as a documentation gap only)
+- [ ] Command gates re-run (impossible in this review environment; the list below must run before commit: `docker compose -f infra/docker-compose.yml up -d postgres`, `WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `cargo test export_ts` plus an empty `git diff -- packages/api-types/src/generated.ts`, `git status`/`git diff` to confirm `migrations/0001-0006` untouched and no unintended edits, `npx pnpm@10 install --frozen-lockfile` plus `pnpm lint`, `pnpm test`, `pnpm build`, and the docs-only check 4b fix)
+- [x] No critical issues found (no Critical, High, or Medium; four Low, five Info)
+- [x] Code follows project conventions
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation (tree grep clean; remaining `--` are command flags and markdown table separators)
+- [x] Phase code integrates cleanly with prior phases (0006 `password_hash` and 0003 `users_email_lower_key` line up with queries/auth.rs; bucket 1 error/config/state extended not restructured; Session non-serializable posture from the bucket 1 review upheld)
+
+### Recurring patterns for other agents
+
+- The DUMMY_PHC pattern (verify unknown-email and NULL-hash misses against a real-parameter dummy hash, one shared error constant, one code path) is the right shape for timing-equalized credential checks; route every new auth failure mode through it so response bodies stay byte-identical.
+- Hand-rolled crypto is acceptable only when fenced by published test vectors (RFC 4231 here) and recorded as an explicit deviation in the ADR. Keep both halves of the fence together.
+- When a mitigation creates a new abuse surface (per-email lockout here), document the accepted trade-off in the ADR trade-offs next to the mitigation, not only the mechanism; reviewers asked to verify "documented" will grep for it.
+- Multi-stage Docker builds need a `.dockerignore` from the first commit; `COPY . .` silently ingests `.env` and `.git` even when only a binary leaves the builder.

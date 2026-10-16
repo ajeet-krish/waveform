@@ -1,0 +1,33 @@
+# Render deployment for the Waveform API (docs/decisions.md, Phase 2
+# bucket 2 ADR): one docker web service against external Neon Postgres
+# on the free plan. Migrations run as an explicit pre-deploy step, never
+# on boot (RUN_MIGRATIONS stays false).
+services:
+  - type: web
+    name: waveform-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    # Apply pending migrations with the API's migrate subcommand before
+    # the new instance takes traffic; it only needs DATABASE_URL.
+    preDeployCommand: waveform-api migrate
+    # Fallback start command, used only if the Dockerfile CMD is ever
+    # overridden; uncomment to pin it:
+    # startCommand: waveform-api
+    envVars:
+      # Neon connection string, pasted into the Render dashboard (never
+      # committed; sync: false means "set manually, not from the repo").
+      - key: DATABASE_URL
+        sync: false
+      # HMAC-SHA256 key for session token hashes; rotating it logs every
+      # user out. Generate with `openssl rand -hex 32`.
+      - key: SESSION_SECRET
+        sync: false
+      # The GitHub Pages deployment is the only browser caller.
+      - key: ALLOWED_WEB_ORIGIN
+        value: https://ajeet-krish.github.io
+      # Production never runs DDL on boot; the preDeployCommand owns it.
+      - key: RUN_MIGRATIONS
+        value: "false"
+      - key: RUST_LOG
+        value: waveform_api=info,sqlx=warn

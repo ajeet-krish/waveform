@@ -5,6 +5,8 @@
 //! `main`. `SESSION_SECRET` is required to serve (never for the
 //! `migrate` subcommand, which only needs the database URL).
 
+use std::fmt;
+
 use anyhow::{bail, Context, Result};
 
 /// Minimum length of `SESSION_SECRET`: it keys opaque bearer sessions, so
@@ -12,7 +14,7 @@ use anyhow::{bail, Context, Result};
 const MIN_SESSION_SECRET_LENGTH: usize = 32;
 
 /// Runtime configuration for one API process.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     /// Postgres connection string.
     pub database_url: String,
@@ -33,6 +35,23 @@ pub struct Config {
     /// local Vite dev server; override with `ALLOWED_WEB_ORIGIN` for the
     /// GitHub Pages deployment.
     pub allowed_web_origin: String,
+}
+
+/// Hand-written `Debug`: `session_secret` keys every session token, so
+/// it must never reach logs or panic output. Every other field prints
+/// as derived.
+impl fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("database_url", &self.database_url)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("run_migrations", &self.run_migrations)
+            .field("session_secret", &"<redacted>")
+            .field("allowed_web_origin", &self.allowed_web_origin)
+            .finish()
+    }
 }
 
 impl Config {

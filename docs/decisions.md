@@ -402,3 +402,71 @@ catalog rows without a lookup table, and re-seeding stays idempotent on both sid
 maintain in SQL. Accepted: the dev reversibility path is `docker compose down -v` plus a
 re-run, the helper is fenced against the Rust and TypeScript implementations, and the
 alternative (per-pull name matching) would live forever in the sync engine.
+
+## 2026-10-15 - Phase 2 bucket 2: Session token hashing, login throttle, and the Render deploy target [LOCKED]
+
+**Status: LOCKED. Implements the email + password auth ADR above; the OTP/invite tables and
+`github_id` column stay retired as that ADR records.**
+
+**Context**: Bucket 2 lands the real auth handlers on top of the bucket 1 groundwork
+(`users.password_hash` plus the auth DTOs). Three operational questions were open: how the
+opaque session token is stored, how login resists password spraying at friend-group scale,
+and where the API actually runs now that it needs to be reachable from the deployed
+GitHub Pages site.
+
+**Decision**:
+- **Session token hashing**: the server generates a 256-bit random token, returns it in
+  `AuthResponse`, and stores only `HMAC-SHA256(token)` keyed by `SESSION_SECRET` (a long
+  random string, generated with `openssl rand -hex 32`) in `sessions.token_hash`.
+  `SESSION_SECRET` therefore has a real role beyond minimum length, and **rotating it
+  invalidates every active session** (a deliberate global logout). Plain SHA-256 was
+  rejected: an attacker with database read access could not invert it, but HMAC keyed by a
+  secret the database never sees adds a second factor to a database-only breach. Sessions
+  live `SESSION_TTL_DAYS = 30` from login; `POST /auth/logout` deletes by hash and is
+  always 204 (idempotent), and `GET /auth/me` re-resolves the session per call, so expiry
+  and revocation are immediate. The HMAC is implemented over `sha2` per RFC 2104 and
+  fenced by the RFC 4231 vectors in the unit tests, keeping one shared `hash_token`
+  primitive across issuance, lookup, and logout so the paths can never disagree on the
+  encoding.
+- **Login throttle**: an in-memory limiter (10 failed attempts per 15 minutes, keyed by
+  `trim` then lowercase email) guards `POST /auth/login` and `POST /auth/signup`; a
+  successful login clears the window. It is process-local by choice: a shared store would
+  add infrastructure for a one-instance free-tier deployment, and restarts resetting
+  counters is an accepted trade-off. Login answers one byte-identical 401 "invalid email or
+  password" for unknown email, wrong password, and NULL-hash accounts, and verifies against
+  a constant dummy Argon2 PHC string so misses cost the same time as real checks.
+- **Handler surface**: `POST /auth/signup` is open (no invite) and validates against
+  `RuleConstants` (password 10 to 1024 bytes, email 3 to 254 bytes with a dotted domain
+  and no whitespace, display name trimmed to 1 to 60 characters); passwords hash with
+  Argon2id (m=19456, t=3, p=1, 32-byte output) in `spawn_blocking`, and a duplicate
+  address answers 409 with exactly "an account with that email already exists". A valid
+  signup answers 201 and login 200, both carrying `AuthResponse` (token, expiry, user;
+  the user never serializes `password_hash`). CORS is one exact allow-list layer over the
+  whole router (GET/POST/OPTIONS, Authorization and Content-Type, no credentials, 600s
+  max age).
+- **Deploy target**: Postgres on Neon (free tier), API on Render (free web service) built
+  from the repo-root `Dockerfile` (multi-stage rust:1-bookworm to debian:bookworm-slim).
+  `render.yaml` pins `preDeployCommand: waveform-api migrate` so migrations are an explicit
+  release step (never DDL on boot; `RUN_MIGRATIONS=false`), with a documented fallback
+  `startCommand: waveform-api`, `healthCheckPath: /healthz`, and the GitHub Pages origin as
+  the exact CORS allow-list. `infra/railway.toml` is header-marked as superseded.
+
+**Rationale**: Keyed HMAC makes the session secret enforceable (rotation kills sessions)
+instead of decorative; the throttle is the smallest thing that stops online password
+spraying without new infrastructure; Neon + Render + Docker keeps the whole backend on
+free tiers while matching the CI image story (one Dockerfile, one binary, migrate as a
+subcommand that only needs `DATABASE_URL`).
+
+**Trade-offs**: Rotating `SESSION_SECRET` logs users out (accepted: it doubles as the
+"revoke all sessions" lever); sessions have no sliding expiration, living 30 days from
+login regardless of activity (accepted for now; refresh mechanics would revisit); the
+in-memory throttle is per-process and resets on deploy (accepted at one instance; a shared
+limiter can revisit with multi-instance hosting); free-tier cold starts and the 750-hour
+limit are acceptable for a friend group.
+- **Per-email lockout DoS**: because the throttle is keyed by email, an attacker who knows
+  a victim's address can lock that address out of login and signup by failing logins
+  against it, keeping it limited through repeated 15-minute windows for as long as they
+  keep going. Mitigations planned: the window is already short (15 minutes), a per-IP
+  failure counter keyed off `X-Forwarded-For` (trusted only behind the platform proxy)
+  would cap what one source can do to one victim, and a DB-backed `login_attempts` table
+  would survive restarts and serve multiple instances.

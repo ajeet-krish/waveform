@@ -2,12 +2,13 @@
 //! error body (`waveform_db::dto::ApiErrorBody`), and the status codes
 //! the client switches on.
 //!
-//! Handlers land in bucket 2; the module ships now so every route shares
-//! one error vocabulary from the start.
+//! The auth handlers (bucket 2) construct most variants; `Forbidden` and
+//! `PayloadTooLarge` are reserved for the sync push handlers (bucket 3),
+//! so the module keeps its dead-code allowance until then.
 
-// The variants are constructed by the bucket 2 handlers; until then the
-// enum would trip the dead-code lint even though the mapping is exercised
-// by IntoResponse.
+// The sync handlers in bucket 3 construct `Forbidden` and
+// `PayloadTooLarge`; until then the enum would trip the dead-code lint
+// even though the mapping is exercised by IntoResponse.
 #![allow(dead_code)]
 
 use axum::{

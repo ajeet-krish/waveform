@@ -5,15 +5,16 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::config::Config;
+use crate::rate_limit::LoginLimiter;
 
 /// State available to all route handlers.
 #[derive(Clone)]
 pub struct AppState {
     /// SQLx connection pool.
     pub pool: PgPool,
-    /// Immutable process configuration (session secret, web origin, ...).
-    /// Read by the bucket 2 auth and sync handlers through their
-    /// extractors; unused until then.
-    #[allow(dead_code)]
+    /// Immutable process configuration: session secret (HMAC key for
+    /// bearer tokens) and the allowed web origin (CORS).
     pub config: Arc<Config>,
+    /// Failed-login throttle shared by the login and signup handlers.
+    pub login_limiter: LoginLimiter,
 }

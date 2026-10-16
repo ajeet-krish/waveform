@@ -9,7 +9,7 @@ and Cargo (Rust) monorepo. Weights in kg, lengths in cm, Brzycki e1RM.
 Backend, Cargo workspace:
 
 - `cargo build --workspace` builds the Rust workspace.
-- `cargo test --workspace` runs all Rust tests (scoring, analytics, sync, db).
+- `cargo test --workspace` runs all Rust tests (api, db, scoring, analytics, sync). Set `WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform` to also run the Postgres-backed suites; without it they skip.
 - `cargo clippy --workspace --all-targets -- -D warnings` lints; warnings fail.
 - `cargo fmt --check` verifies formatting.
 - `cargo run -p waveform-api -- migrate` applies migrations and exits.
@@ -26,8 +26,8 @@ Frontend, pnpm workspace (`apps/web`, `packages/*`):
 
 Local infra:
 
-- `docker compose -f infra/docker-compose.yml up -d` starts Postgres and Mailpit (dev OTP inbox at http://localhost:8025).
-- Web deploys to GitHub Pages; the API and Postgres run locally via Docker (managed hosting deferred).
+- `docker compose -f infra/docker-compose.yml up -d` starts Postgres (and Mailpit, inert Phase 0 residue) for local development.
+- Web deploys to GitHub Pages; the API deploys to Render from the repo-root `Dockerfile` against Neon Postgres (`render.yaml`), and runs locally via Docker.
 
 ## Conventions
 
@@ -43,7 +43,7 @@ Local infra:
 
 ## Project Map
 
-- `apps/api` - Axum binary: routers, extractors, handlers, config, state.
+- `apps/api` - Axum library plus thin binary: auth routes (signup, login, logout, me), extractors, rate limiter, config, state.
 - `apps/web` - SolidJS + Vite PWA: routes, the IndexedDB data core (`src/db`), and `src/lib` modules. Phase 1 done.
 - `crates/db` - SQLx pool, migration runner, row models (ts-rs), queries.
 - `crates/scoring` - Brzycki e1RM, Effort Points, V-points (pure, unit-tested).
@@ -53,7 +53,8 @@ Local infra:
 - `packages/scoring` - TS Brzycki e1RM, V-points, Effort Points; shared golden vectors fence the Rust crate.
 - `packages/ui` - SolidJS components: charts, heatmap grid, body map. Planned.
 - `migrations` - SQLx SQL: `0001_init.sql` (schema), `0002_seed_catalog.sql` (seed).
-- `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml` (API service reference).
+- `infra` - `docker-compose.yml` (Postgres + Mailpit), `railway.toml` (superseded by `render.yaml`).
+- `Dockerfile` and `render.yaml` - Render deploy: multi-stage API image, free web service, pre-deploy `waveform-api migrate`.
 - `docs` - architecture, decision records, research.
 
 ## Status
@@ -62,7 +63,7 @@ Local infra:
 |-------|-------------|--------|
 | Phase 0 Foundation | Monorepo, schema and migrations, CI/CD, GitHub Pages deploy | Complete |
 | Phase 1 Local-first training core | Workouts, exercises, body stats, climbing, cycling, dashboard, settings and backup (no backend) | Complete |
-| Phase 2 Backend + auth + sync | API deploy, auth, sync push/pull, routines, remaining activities | Not started |
+| Phase 2 Backend + auth + sync | Auth core + deploy readiness done (bucket 2); sync push/pull, routines, remaining activities open | In progress |
 | Phase 3 Social | Leaderboards, heatmap, feed, kudos | Not started |
 | Phase 4 Challenges + hardening | Challenges, hardening, backup and restore drill | Not started |
 
