@@ -1,11 +1,14 @@
 //! Request extractors shared by the authenticated routes.
 //!
 //! [`AuthUser`] resolves the `Authorization: Bearer` header into the
-//! session's user; [`ApiJson`] turns body-parse failures into the
-//! standard [`ApiError`] envelope instead of axum's plain-text rejections.
+//! session's user; [`ApiJson`] turns body-parse failures (including the
+//! router's body-limit 413) into the standard [`ApiError`] envelope
+//! instead of axum's plain-text rejections; [`ApiQuery`] does the same
+//! for query strings, mapping every failure to
+//! [`ApiError::BadRequest`].
 
-use axum::extract::{FromRequest, FromRequestParts, Request};
-use axum::http::{header::AUTHORIZATION, request::Parts, HeaderMap};
+use axum::extract::{FromRequest, FromRequestParts, Query, Request};
+use axum::http::{header::AUTHORIZATION, request::Parts, HeaderMap, StatusCode};
 use axum::Json;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
@@ -64,7 +67,10 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 
 /// A JSON body extractor whose failures land in the shared error
 /// envelope: malformed or mismatched JSON becomes
-/// [`ApiError::InvalidPayload`] (HTTP 422, `invalid_payload`).
+/// [`ApiError::InvalidPayload`] (HTTP 422, `invalid_payload`), and a body
+/// larger than the router's [`axum::extract::DefaultBodyLimit`] keeps
+/// axum's 413 as [`ApiError::PayloadTooLarge`] (HTTP 413,
+/// `payload_too_large`).
 pub struct ApiJson<T>(pub T);
 
 impl<S, T> FromRequest<S> for ApiJson<T>
@@ -77,7 +83,33 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(ApiJson(value)),
+            // The body limit rejects oversized requests with 413 before
+            // any handler logic runs; that status must survive instead
+            // of collapsing into the 422 envelope.
+            Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(ApiError::PayloadTooLarge(rejection.body_text()))
+            }
             Err(rejection) => Err(ApiError::InvalidPayload(rejection.body_text())),
+        }
+    }
+}
+
+/// A query-string extractor whose failures land in the shared error
+/// envelope: a missing, malformed, or undeserializable query becomes
+/// [`ApiError::BadRequest`] (HTTP 400, `bad_request`).
+pub struct ApiQuery<T>(pub T);
+
+impl<S, T> FromRequestParts<S> for ApiQuery<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match Query::<T>::from_request_parts(parts, state).await {
+            Ok(Query(value)) => Ok(ApiQuery(value)),
+            Err(_) => Err(ApiError::BadRequest("invalid query parameters".to_owned())),
         }
     }
 }

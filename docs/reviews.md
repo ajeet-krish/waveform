@@ -616,3 +616,56 @@ is static analysis of the working tree.
 - Hand-rolled crypto is acceptable only when fenced by published test vectors (RFC 4231 here) and recorded as an explicit deviation in the ADR. Keep both halves of the fence together.
 - When a mitigation creates a new abuse surface (per-email lockout here), document the accepted trade-off in the ADR trade-offs next to the mitigation, not only the mechanism; reviewers asked to verify "documented" will grep for it.
 - Multi-stage Docker builds need a `.dockerignore` from the first commit; `COPY . .` silently ingests `.env` and `.git` even when only a binary leaves the builder.
+
+## 2026-10-16 - Phase 2 bucket 3a: sync routes (code review)
+
+Verdict: PASS (static analysis; execution gates NOT RUN in this environment, list below)
+
+Scope: uncommitted Phase 2 bucket 3a change set (server sync surface): new
+`apps/api/src/routes/sync.rs` and `apps/api/tests/sync_routes.rs`; edited
+`apps/api/src/routes/mod.rs`, `apps/api/src/extractors.rs`, `apps/api/src/error.rs`,
+`crates/db/src/dto.rs`, `packages/api-types/src/generated.ts` (regenerated). Wires the
+bucket 1 engine (`apply_ops`, `pull_page`) to two authenticated handlers; no engine or
+client changes. IMPORTANT: this review environment has no shell tool, exactly like the
+prior reviews: `git status`/`git diff` and every command gate could NOT be executed.
+Everything below is static analysis of the working tree.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1a. Push pre-check, 413, zero side effects | PASS | `ops.len() > max_ops_per_push` checked at sync.rs:56-67 before `apply_ops` (sync.rs:69), so an oversized batch answers 413 with no database work; `usize::try_from(...).unwrap_or(0)` (sync.rs:60) fails closed on any conversion surprise. Test `a_push_over_the_ops_cap_is_413_with_zero_side_effects` (sync_routes.rs:447-497) pins the documented 200 cap (sync_routes.rs:457) and asserts zero `client_ops` claims and zero rows after a 201-op push. |
+| 1b. ForeignOpId to 409, batch abort | PASS | `From<ApplyError>` (error.rs:121-133) maps `ForeignOpId` to `Conflict`/`conflict` and `Database` to `Internal`; the handler simply propagates with `?` (sync.rs:69). `a_foreign_op_id_aborts_the_batch_with_conflict` (sync_routes.rs:356-445) asserts 409 + envelope message, the trailing op never runs and is never claimed (sync_routes.rs:417-429), and Mallory's claim and row stay hers. Partial-commit semantics (ops before the foreign one stay committed, sync_routes.rs:408-415) match the bucket 1 engine contract and are explicitly asserted. |
+| 1c. Pull request validation to 400 | PASS | `SyncEntity::parse` up front (sync.rs:81-82) and `parse_cursor` pre-decode (sync.rs:85-88) turn bad entity/cursor into `BadRequest` instead of the engine's internal `sqlx::Error::Decode` 500 (sync_pull.rs:49-53). Covered at sync_routes.rs:746-804: unknown entity, malformed cursor (message "invalid cursor"), non-numeric limit via the extractor, and missing entity, all 400 `bad_request`. |
+| 1d. Limit clamping | PASS | `query.limit.unwrap_or(page_size).clamp(1, page_size)` (sync.rs:89-90) with `pull_page_size = 500` (dto.rs:315); engine re-clamps (sync_pull.rs:45), idempotent. `pull_clamps_the_limit_to_the_rule_bounds` (sync_routes.rs:994-1051) exercises limit 0, -5 (both behave as 1), page_size+10 (behaves as 500, null cursor), and the default. |
+| 2. Error mapping table | PASS | Nine variants, one status and one code each (error.rs:51-77): 400/401/403/404/409/422/413/429/500 coherent. `ApiJson` keeps the axum body-limit 413 as `PayloadTooLarge` and maps every other rejection to `InvalidPayload` (extractors.rs:84-94); `ApiQuery` maps all query failures to `BadRequest` (extractors.rs:110-113). `rejection.status()`/`body_text()` are the documented axum 0.8.9 rejection accessors (axum pinned in Cargo.toml:18, Cargo.lock:69-70); compile confirmation is gate item 2. 500s log detail and return generic literals only (error.rs:97-105, 128-130). |
+| 3. Router wiring | PASS | `sync::router()` merged at routes/mod.rs:45; `DefaultBodyLimit::max(2 * 1024 * 1024)` (routes/mod.rs:36, 50) applied after all merges, CORS still the last `.layer(cors)` so it stays outermost and preflights never reach a handler (routes/mod.rs:50-51, comment at 38-39). The body-limit layer placement is what the `an_oversized_body_is_413_with_the_error_envelope` test (sync_routes.rs:499-538) exercises end to end. |
+| 4. DTO and generated types | PASS (drift gate pending) | `ApiErrorCode::BadRequest` added (dto.rs:180); `generated.ts:43` union is the full nine-value snake_case set in declaration order, `bad_request` first; `OpResult.error: ApiErrorCode \| null` (generated.ts:158-162) matches dto.rs:137-142. All other exported types inspected match their Rust sources. Byte-identical `cargo test export_ts` regeneration NOT verifiable here; gate item 5. |
+| 5. Test genuineness | PASS | Exactly 14 `#[tokio::test]` cases (grep), each mapping to a required scenario: push/pull auth (sync_routes.rs:227-252, 726-743), payload-owner override (254-293), duplicate + discarded_stale incl. stale-op claim (295-354), foreign-op 409 abort (356-445), 200-op cap zero side effects (447-497), body-limit 413 (499-538), malformed JSON 422 (three shapes, 540-571), missing parent retryable with no claim (573-620), CHECK violation + catalog hijack rejected with no trace (622-724), unknown entity / bad cursor / bad query / missing entity 400s (745-804), paging with cursor round trip, tombstone at the tip and null `next_cursor` (806-899), two-user scoping incl. catalog exclusion (901-992), limit clamping (994-1051). All drive the real `routes::router` via `tower::oneshot` against a migrated scratch Postgres (`support::migrated_scratch`, crates/db/tests/support/mod.rs:55-86, included by `#[path]`, sync_routes.rs:32-33), skipping cleanly without `WAVEFORM_TEST_DATABASE_URL`. |
+| 6. Conventions and cleanliness | PASS (git-dependent parts unverifiable) | 4-space K&R throughout, snake_case locals, PascalCase types, SCREAMING_SNAKE consts; zero `unsafe` in apps/api (grep); zero em or en dashes in rs/ts/md (grep); remaining `--` are command flags only (sync_routes.rs:11). Migrations dir holds exactly `0001`-`0006` (unchanged set); the handlers consume only the bucket 1 public engine surface (`apply_ops`, `pull_page`, `parse_cursor`, `PullParams`, `ApplyError`, queries/mod.rs:18-19) with no engine edits visible in the working tree. "No engine behavior change" and "no unintended edits" are NOT verifiable without git; gate item 6. |
+
+### Findings (non-blocking)
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Info | apps/api/tests/sync_routes.rs (cap test) | The cap's success boundary is untested: exactly 200 ops passing is only implied by the `>` comparison (sync.rs:61) and the 201-op rejection. | Optionally assert one 200-op push returns 200 with 200 results. |
+| Info | apps/api/src/routes/sync.rs:82 | The 400 message echoes raw `query.entity` input back to the client. Serde JSON-escapes it and the caller is authenticated, so there is no injection path; noting only as a pattern to keep escaped. | None required. |
+| Info | apps/api/src/extractors.rs:112 | `ApiQuery` discards the underlying query rejection without a debug log; diagnosing a client with a mangled query string needs reproduction. | Optional: `tracing::debug!` the rejection alongside the generic message. |
+| Info | apps/api/src/error.rs:40-43 | Variant declaration order interleaves 422 (`InvalidPayload`) before 413 (`PayloadTooLarge`); the mapping tables are coherent regardless. | Optional cosmetic reorder to match status order. |
+| Note | apps/api/tests/sync_routes.rs:408-415 | A foreign `op_id` aborts the batch but ops before it stay committed (no batch-level transaction). This is the bucket 1 engine contract, now pinned by test; the web client retry loop must tolerate partial batch progress on 409. | None; keep the contract documented in the client sync design. |
+
+### Verification Checklist
+
+- [x] All checks passed (6 of 6 code checks PASS; five non-blocking observations above)
+- [x] No critical issues found (no Critical, High, Medium, or Low findings)
+- [x] Code follows project conventions
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation (tree grep clean; remaining `--` are command flags and markdown table separators)
+- [x] Phase code integrates cleanly with prior phases (bucket 1 engine surface used unchanged; bucket 2 extractors extended not restructured; the bucket 2 docs-only item (lockout DoS, decisions.md:466) has landed)
+- [ ] Command gates re-run (impossible in this review environment; must run before commit: `docker compose -f infra/docker-compose.yml up -d postgres`; `WAVEFORM_TEST_DATABASE_URL=postgres://waveform:waveform@localhost:5432/waveform cargo test --workspace`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo fmt --check`; `cargo test export_ts` plus an empty `git diff -- packages/api-types/src/generated.ts`; `git status`/`git diff` to confirm no `crates/db/src/queries` behavior change, `migrations/0001-0006` untouched, and no unintended edits; `pnpm lint`, `pnpm test`, `pnpm build`)
+
+### Recurring patterns for other agents
+
+- Validate opaque wire tokens (cursors here) with the exported decoder before handing them to the engine, so a client mistake is a 400 and never an internal decode 500; keep the engine's decode as the second, unreachable line of defense.
+- Pre-check payload sizes against `RuleConstants` caps in the handler before any database work; an envelope 413 with zero side effects is testable and honest, and the axum body limit stays a second, earlier net whose 413 must survive extractor rejection mapping.
+- When a composite extractor rejection carries a status the envelope must preserve (413 from `DefaultBodyLimit`), branch on `rejection.status()` explicitly; folding every rejection into one code silently rewrites the status clients act on.
+- Batch semantics deserve one integration test that pins the uncomfortable edges explicitly: partial commit before an abort, and no claim for rejected or retryable ops. Future buckets should keep that habit.

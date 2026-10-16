@@ -2,13 +2,14 @@
 //! error body (`waveform_db::dto::ApiErrorBody`), and the status codes
 //! the client switches on.
 //!
-//! The auth handlers (bucket 2) construct most variants; `Forbidden` and
-//! `PayloadTooLarge` are reserved for the sync push handlers (bucket 3),
-//! so the module keeps its dead-code allowance until then.
+//! The auth handlers (bucket 2) and the sync handlers (bucket 3) build
+//! most variants; `Forbidden` is still reserved for a handler that
+//! refuses a request outright, so the module keeps its dead-code
+//! allowance until every variant is constructed.
 
-// The sync handlers in bucket 3 construct `Forbidden` and
-// `PayloadTooLarge`; until then the enum would trip the dead-code lint
-// even though the mapping is exercised by IntoResponse.
+// `Forbidden` has no constructor yet; until one lands the enum would
+// trip the dead-code lint even though the mapping is exercised by
+// IntoResponse.
 #![allow(dead_code)]
 
 use axum::{
@@ -25,6 +26,9 @@ use waveform_db::{
 /// `{"code": "...", "message": "..."}` with a matching HTTP status.
 #[derive(Debug)]
 pub enum ApiError {
+    /// 400: the request itself is malformed (unknown entity, corrupt
+    /// cursor, undeserializable query string).
+    BadRequest(String),
     /// 401: no or invalid bearer session.
     Unauthorized(String),
     /// 403: authenticated but not allowed (foreign rows, foreign parents).
@@ -46,6 +50,7 @@ pub enum ApiError {
 impl ApiError {
     fn status(&self) -> StatusCode {
         match self {
+            ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             ApiError::Forbidden(_) => StatusCode::FORBIDDEN,
             ApiError::NotFound(_) => StatusCode::NOT_FOUND,
@@ -59,6 +64,7 @@ impl ApiError {
 
     fn code(&self) -> ApiErrorCode {
         match self {
+            ApiError::BadRequest(_) => ApiErrorCode::BadRequest,
             ApiError::Unauthorized(_) => ApiErrorCode::Unauthorized,
             ApiError::Forbidden(_) => ApiErrorCode::Forbidden,
             ApiError::NotFound(_) => ApiErrorCode::NotFound,
@@ -72,7 +78,8 @@ impl ApiError {
 
     fn message(&self) -> &str {
         match self {
-            ApiError::Unauthorized(message)
+            ApiError::BadRequest(message)
+            | ApiError::Unauthorized(message)
             | ApiError::Forbidden(message)
             | ApiError::NotFound(message)
             | ApiError::Conflict(message)

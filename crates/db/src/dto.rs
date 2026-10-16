@@ -177,6 +177,7 @@ pub struct PullPage {
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "generated.ts")]
 pub enum ApiErrorCode {
+    BadRequest,
     Unauthorized,
     Forbidden,
     NotFound,

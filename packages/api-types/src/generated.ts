@@ -40,7 +40,7 @@ export type ApiErrorBody = { code: ApiErrorCode, message: string, };
  * Stable machine-readable error codes; the HTTP status mapping lives in
  * `apps/api/src/error.rs`.
  */
-export type ApiErrorCode = "unauthorized" | "forbidden" | "not_found" | "conflict" | "invalid_payload" | "payload_too_large" | "rate_limited" | "internal";
+export type ApiErrorCode = "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "invalid_payload" | "payload_too_large" | "rate_limited" | "internal";
 
 /**
  * Sign-in response: the opaque bearer token travels in

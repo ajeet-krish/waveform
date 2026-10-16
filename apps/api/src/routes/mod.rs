@@ -1,19 +1,22 @@
 //! Router assembly.
 //!
-//! Feature routers (auth, workout, activity, social) live in sibling
-//! modules; each exposes `router()` and is merged here as its handlers
-//! land. The whole surface sits behind one CORS layer pinned to the
-//! deployed web origin (ADR 2026-10-15, bucket 2).
+//! Feature routers (auth, sync, workout, activity, social) live in
+//! sibling modules; each exposes `router()` and is merged here as its
+//! handlers land. The whole surface sits behind one CORS layer pinned to
+//! the deployed web origin (ADR 2026-10-15, bucket 2) and one request
+//! body limit (bucket 3), both applied after every route is registered
+//! because layers only wrap the routes that exist when they are added.
 
 pub mod activity;
 pub mod auth;
 pub mod social;
+pub mod sync;
 pub mod workout;
 
 use std::time::Duration;
 
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{header, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -27,6 +30,11 @@ use crate::state::AppState;
 /// Preflight cache lifetime in seconds.
 const CORS_MAX_AGE: Duration = Duration::from_secs(600);
 
+/// Maximum request body in bytes. A full push batch (the 200-op cap) is
+/// tens of kilobytes, so anything approaching 2 MB is garbage; the limit
+/// rejects it before a handler or extractor touches the body.
+const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+
 /// Build the full application router: every route plus the CORS layer
 /// (the outermost layer, so preflights never reach a handler).
 pub fn router(state: AppState) -> Router {
@@ -34,10 +42,12 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .merge(auth::router())
+        .merge(sync::router())
         .merge(workout::router())
         .merge(activity::router())
         .merge(social::router())
         .with_state(state)
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(cors)
 }
 
