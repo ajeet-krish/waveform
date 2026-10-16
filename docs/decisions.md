@@ -1,6 +1,6 @@
 # Waveform Decision Records
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 Status markers: [LOCKED] current and binding, [SUPERSEDED] replaced by a later ADR (kept for
 history only), [SUPERSEDED IN PART], [HISTORICAL] provisional record later finalized.
@@ -333,3 +333,72 @@ migration that will never run. Deleting it now keeps the importer honest about w
 
 **Trade-offs**: A real v1 export in the wild can no longer be imported. Accepted: there is no v1
 data to import, and the Waveform backup format is the only import path.
+
+## 2026-10-15 - Phase 2: Email + password accounts with bearer sessions [LOCKED]
+
+**Status: LOCKED. Supersedes the invite-only auth design (email 6-digit OTP typed manually, or
+GitHub OAuth) recorded in the 2026-10-13 C-2 rebuild ADR and repeated in the stack-lock ADR's
+explicit-weighting note; those ADRs stay as written for history.**
+
+**Context**: The auth surface planned in Phase 0 assumed an invite-only friend group and an
+email inbox in the loop (Mailpit in dev). Phase 2 needs signup and login for a small group
+that does not want to type OTP codes, and the OTP/invite/OAuth machinery (otp_codes, invites,
+GitHub id linking, email verification) is a large surface for a product with no public
+registration.
+
+**Decision**: Accounts are email + password, nothing else:
+- Signup and login are `POST /auth/signup` and `POST /auth/login` with an email and a
+  password; the password is stored as an Argon2id PHC string in `users.password_hash`
+  (nullable column, added by migration 0006; login rejects NULL because no bucket 1
+  account has a hash yet).
+- No OTP, no MFA, no email verification, no GitHub OAuth. The `github_id` column stays in
+  the schema as a retired column rather than a migration target; invites and OTP tables
+  remain from Phase 0 but are dead until a later decision revives them.
+- Sessions are opaque bearer tokens presented in an `Authorization: Bearer` header, never
+  a cross-site cookie, so no CSRF surface and no cookie plumbing; the server stores only a
+  hash of the token (the existing `sessions.token_hash` shape).
+- Bucket 1 ships only the groundwork: the column plus the auth DTOs (`SignupRequest`,
+  `LoginRequest`, `AuthResponse`). The signup and login handlers land in bucket 2.
+
+**Rationale**: One auth path with one failure mode beats three. Password auth needs no
+inbox, no OAuth app registration, and no invite CLI; bearer headers sidestep the cookie
+CSRF class entirely, which matters more than the (available, but heavier) cookie patterns
+at friend-group scale.
+
+**Trade-offs**: Passwords put breach hygiene on us (Argon2id plus a future rate limit and
+password reset story). Accepted: no email verification means anyone can claim an unowned
+address until reset flows land, and the retired OTP/invite tables linger in the schema
+until a cleanup ADR removes them.
+
+## 2026-10-15 - Phase 2: Server catalog ids converge on client UUIDv5 [LOCKED]
+
+**Status: LOCKED. Completes the 2026-10-15 "Deterministic UUIDv5 catalog identity" ADR,
+which deferred server/client id convergence to the sync phase.**
+
+**Context**: The server seeded the global exercise catalog with random `gen_random_uuid()`
+ids while the client derives deterministic RFC 4122 UUIDv5 ids over the DNS namespace and
+`lower(name)` (`apps/web/src/db/seed/uuidV5.ts`). With sync landing, two id spaces for one
+catalog would force a name-based reconciliation on every pull.
+
+**Decision**: Migration 0006 converges the server on the client derivation:
+- A core-Postgres `waveform_uuidv5(namespace, name)` (plpgsql SHA-1 plus `set_byte` for the
+  version and variant bits, no pgcrypto) and `waveform_catalog_id(name)` =
+  `uuidv5(DNS, lower(name))`, byte for byte what `uuidV5.ts` computes.
+- Every global catalog row is remapped to `waveform_catalog_id(name)`, and
+  `exercise_entries.exercise_id` / `routine_entries.exercise_id` follow in the same
+  transaction. The two FKs become `DEFERRABLE INITIALLY IMMEDIATE` and the migration runs
+  `SET CONSTRAINTS ALL DEFERRED` so parent and child updates coexist; guard blocks raise a
+  clear exception on a catalog name collision or an occupied target id, and the whole file
+  is re-entrant (a second run matches zero rows).
+- The parity fence has three legs: the SQL helper, `crates/db/tests/catalog_uuidv5.rs`
+  (SQL versus `uuid::new_v5`, before/after counts, orphans, re-entrancy), and the same
+  golden vectors in the client vitest suite (`uuidV5Golden.test.ts`).
+
+**Rationale**: Deterministic ids computed twice and fenced by tests beat ids reconciled at
+runtime: pulls carry ids the client already knows, the Phase 2 import can map names onto
+catalog rows without a lookup table, and re-seeding stays idempotent on both sides.
+
+**Trade-offs**: One irreversible data migration (remapped ids) and a plpgsql SHA-1 to
+maintain in SQL. Accepted: the dev reversibility path is `docker compose down -v` plus a
+re-run, the helper is fenced against the Rust and TypeScript implementations, and the
+alternative (per-pull name matching) would live forever in the sync engine.

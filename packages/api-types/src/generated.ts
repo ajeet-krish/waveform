@@ -22,9 +22,41 @@ routes_sent: number | null, notes: string | null, created_at: string, updated_at
 applied_at: string, deleted_at: string | null, };
 
 /**
+ * `activities` CHECK bounds, mirroring `ACTIVITY_RULES`.
+ */
+export type ActivityRules = { durationMin: number, durationMax: number, climbGradeValueMin: number, climbGradeValueMax: number, routesSentMin: number, };
+
+/**
  * Discipline of a non-lifting activity.
  */
 export type ActivityType = "cycling" | "climbing" | "running" | "hike" | "swim";
+
+/**
+ * The error envelope every failing endpoint returns.
+ */
+export type ApiErrorBody = { code: ApiErrorCode, message: string, };
+
+/**
+ * Stable machine-readable error codes; the HTTP status mapping lives in
+ * `apps/api/src/error.rs`.
+ */
+export type ApiErrorCode = "unauthorized" | "forbidden" | "not_found" | "conflict" | "invalid_payload" | "payload_too_large" | "rate_limited" | "internal";
+
+/**
+ * Sign-in response: the opaque bearer token travels in
+ * `Authorization: Bearer <token>` from here on, never as a cookie.
+ */
+export type AuthResponse = { token: string, expires_at: string, user: User, };
+
+/**
+ * `body_stats` CHECK bounds, mirroring `BODY_RULES`.
+ */
+export type BodyRules = { 
+/**
+ * Strict lower bound: 0 kg is not a plausible human weight, so the
+ * SQL CHECK is `weight_kg > 0`.
+ */
+weightMinKgExclusive: number, weightMaxKg: number, bodyfatMinPct: number, bodyfatMaxPct: number, };
 
 /**
  * A body measurement entry. Owner-private: never included in feeds or
@@ -69,7 +101,12 @@ export type Exercise = { id: string,
 /**
  * Null marks a global catalog exercise visible to everyone.
  */
-owner_id: string | null, name: string, muscle_group: string, equipment: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
+owner_id: string | null, name: string, muscle_group: string, equipment: string | null, created_at: string, updated_at: string, 
+/**
+ * Server-stamped sync cursor timestamp; never client-writable
+ * (added by migrations/0006 so custom exercises join the pull).
+ */
+applied_at: string, deleted_at: string | null, };
 
 /**
  * One exercise slot inside a workout.
@@ -105,11 +142,82 @@ export type Kudos = { id: string, workout_id: string, user_id: string, created_a
 applied_at: string, deleted_at: string | null, };
 
 /**
+ * `POST /auth/login`: email + password sign-in. A NULL
+ * `users.password_hash` never authenticates.
+ */
+export type LoginRequest = { email: string, password: string, };
+
+/**
+ * One outbox op action as it travels on the wire.
+ */
+export type OpAction = "create" | "update" | "delete";
+
+/**
+ * Outcome of one op, in request order.
+ */
+export type OpResult = { op_id: string, status: OpStatus, 
+/**
+ * Set for [`OpStatus::Rejected`]; `null` otherwise.
+ */
+error: ApiErrorCode | null, };
+
+/**
+ * Per-op outcome reported back to the client inside `PushResponse`.
+ */
+export type OpStatus = "applied" | "discarded_stale" | "duplicate" | "rejected" | "retryable";
+
+/**
+ * Password policy for email + password accounts.
+ */
+export type PasswordRules = { minPasswordLength: number, };
+
+/**
  * A user as other members see them: the only fields safe for cross-user
  * surfaces (feed, leaderboard, heatmap, kudos). Never carries email or
  * GitHub identity.
  */
 export type PublicUser = { id: string, display_name: string, avatar_url: string | null, };
+
+/**
+ * `GET /sync/pull` response page: rows ordered by `(applied_at, id)`,
+ * cursor exclusive. `next_cursor` is `null` when the page was not filled,
+ * so an empty follow-up page is not required to detect the tip.
+ */
+export type PullPage = { rows: Array<PullRow>, next_cursor: string | null, };
+
+/**
+ * One pulled row. `payload` is the stored row as JSON minus the
+ * server-stamped `applied_at`, which is exposed here instead so the
+ * client can echo the cursor.
+ */
+export type PullRow = { entity: SyncEntity, id: string, applied_at: string, payload: Record<string, unknown>, };
+
+/**
+ * One pushed op: the wire shape of a client outbox entry. `created_at`
+ * is local-only and never crosses the wire.
+ */
+export type PushOp = { op_id: string, entity: SyncEntity, action: OpAction, 
+/**
+ * The full row (tombstone payloads carry the full row too). Server
+ * columns (`user_id`/`owner_id`, `updated_at`, `deleted_at`,
+ * `applied_at`, `e1rm_kg`) are never trusted from here.
+ */
+payload: Record<string, unknown>, 
+/**
+ * The row's LWW timestamp; clamped server-side before it drives
+ * last-write-wins.
+ */
+updated_at: string, };
+
+/**
+ * `POST /sync/push` request body.
+ */
+export type PushRequest = { ops: Array<PushOp>, };
+
+/**
+ * `POST /sync/push` response body: one result per op, in order.
+ */
+export type PushResponse = { results: Array<OpResult>, };
 
 /**
  * A reusable workout template.
@@ -130,6 +238,14 @@ export type RoutineEntry = { id: string, routine_id: string, exercise_id: string
 applied_at: string, deleted_at: string | null, };
 
 /**
+ * The whole rule tree in one value. Field names deep-equal the client
+ * constants in `apps/web/src/db/validation.ts`; the vitest parity test
+ * (`apps/web/src/db/rulesParity.test.ts`) and `export_ts_rules` keep the
+ * two sides honest.
+ */
+export type RuleConstants = { set: SetRules, activity: ActivityRules, body: BodyRules, sync: SyncLimits, password: PasswordRules, };
+
+/**
  * A single set. `e1rm_kg` is a stored generated column (Brzycki) written by
  * Postgres, never by the client.
  */
@@ -148,12 +264,40 @@ e1rm_kg: number, created_at: string, updated_at: string,
 applied_at: string, deleted_at: string | null, };
 
 /**
- * A registered user. Signup is invite-only. Owner-only surface: renders
- * other users through [`PublicUser`] in feeds, leaderboards, and heatmaps.
+ * `set_entries` CHECK bounds, mirroring `SET_RULES` in
+ * `apps/web/src/db/validation.ts`.
+ */
+export type SetRules = { repsMin: number, repsMax: number, weightMinKg: number, weightMaxKg: number, };
+
+/**
+ * `POST /auth/signup`: email + password account creation (bucket 2
+ * lands the handler; no invite codes, no OTP).
+ */
+export type SignupRequest = { email: string, password: string, display_name: string, };
+
+/**
+ * Syncable entity names, byte for byte the client's `OutboxEntity`
+ * strings plus the routine pair Phase 2 adds.
+ */
+export type SyncEntity = "exercises" | "workout_sessions" | "exercise_entries" | "set_entries" | "activities" | "body_stats" | "routines" | "routine_entries";
+
+/**
+ * Server sync limits agreed with the client: batch cap, pull page size,
+ * and the client clock skew tolerance used by
+ * `waveform_sync::clamp_client_timestamp`.
+ */
+export type SyncLimits = { maxOpsPerPush: number, pullPageSize: number, maxClientClockSkewMinutes: number, };
+
+/**
+ * A registered user with an email + password account (ADR 2026-10-15:
+ * no OTP, no MFA, no email verification, no GitHub OAuth). Owner-only
+ * surface: renders other users through [`PublicUser`] in feeds,
+ * leaderboards, and heatmaps.
  */
 export type User = { id: string, email: string, display_name: string, 
 /**
- * Linked GitHub account for OAuth login, if any.
+ * Linked GitHub account from the retired OAuth design; kept for the
+ * schema, unused by the email + password flow.
  */
 github_id: string | null, avatar_url: string | null, created_at: string, updated_at: string, deleted_at: string | null, };
 

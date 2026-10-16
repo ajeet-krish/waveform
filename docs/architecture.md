@@ -209,6 +209,30 @@ activities. Sync is local-first writes with server-aggregated reads: push is ide
 opaque session cookie, sha256 token, Argon2id-hashed OTP codes; `body_stats` is owner-only. Full
 DDL lives in `migrations/0001_init.sql`.
 
+## Phase 2 Sync Engine (bucket 1, 2026-10-15)
+
+The server half of sync is now an entity-generic engine in `crates/db/src/queries`:
+`spec.rs` registers one `EntitySpec` per synced table (payload-writable columns, forced
+owner column, parent checks, pull FROM/owner predicate, all static SQL builders);
+`sync_apply.rs::apply_op` runs one transaction per pushed op (claim `client_ops` by PK,
+clamp the client timestamp against `SELECT now()`, prove row and parent ownership,
+last-write-wins, then a `jsonb_populate_record` upsert with an `ON CONFLICT` race guard;
+CHECK/data errors reject as `invalid_payload`, FK misses retry without claiming, a foreign
+`op_id` aborts the batch with 409); `sync_pull.rs::pull_page` pages rows on the
+server-stamped `(applied_at, id)` cursor with tombstones included and the limit clamped to
+`RuleConstants`. Wire DTOs live in `crates/db/src/dto.rs` (exported to
+`packages/api-types`, plus `rules.generated.ts` carrying the typed `RULE_CONSTANTS`
+that `apps/web/src/db/rulesParity.test.ts` deep-equals against the client guards).
+
+Migration `0006_sync_foundation.sql` (append-only, re-entrant) adds
+`users.password_hash` for the email + password ADR above, gives `exercises` the
+`applied_at` column plus trigger and pull index so custom exercises join the cursor, adds
+plain pull indexes on the three child tables, and converges global catalog ids onto the
+client's deterministic UUIDv5 (`waveform_uuidv5` / `waveform_catalog_id`, core Postgres
+only) with the FKs made deferrable initially immediate so children follow their parents in
+the same transaction. Auth is email + password with an opaque bearer token in the
+`Authorization` header (bucket 2 lands the handlers; bucket 1 ships the column and DTOs).
+
 ## Phase Plan
 
 - Phase 0: monorepo, schema + migrations, CI/CD, deploy skeleton, auth shell.

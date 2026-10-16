@@ -1,4 +1,4 @@
-//! Offline-first sync engine (contract only in phase 0).
+//! Offline-first sync engine.
 //!
 //! The sync contract, from docs/architecture.md plus the phase 0 review
 //! fixes (docs/reviews.md):
@@ -16,8 +16,8 @@
 //!   the lookup is USER-SCOPED ([`idempotency_check`]). Replaying your own
 //!   stored op is a no-op success; presenting an `op_id` that already
 //!   exists under a DIFFERENT user is rejected with HTTP 409
-//!   ([`ApplyOutcome::RejectedForeignOp`]), so a learned foreign `op_id`
-//!   cannot pre-claim and suppress the victim's op.
+//!   (`ApplyError::ForeignOpId`), so a learned foreign `op_id` cannot
+//!   pre-claim and suppress the victim's op.
 //! * Conflict resolution: last-write-wins on the client's `updated_at`.
 //!   Client timestamps are untrusted: they are clamped
 //!   ([`clamp_client_timestamp`]) to at most [`MAX_CLIENT_CLOCK_SKEW_MINUTES`]
@@ -39,13 +39,19 @@
 //!   `applied_at` across a page boundary are never dropped, and because
 //!   `applied_at` comes from the server clock a future-skewed client
 //!   `updated_at` can never starve a pull. Cursors are opaque to clients;
-//!   they only echo them back.
+//!   they only echo them back; [`cursor`] holds the `{micros}-{uuid}`
+//!   encoding.
 //!
-//! Phase 1 implements the push/pull handlers in `apps/api` on top of the
-//! helpers here. This module only pins down the primitives.
+//! Phase 2 turns this contract into the apply and pull engine in
+//! `crates/db/src/queries`, driven by the push and pull handlers in
+//! `apps/api`.
+
+pub mod cursor;
 
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
+
+pub use cursor::{decode_cursor, encode_cursor, Cursor, CursorError};
 
 /// How far a client-supplied `updated_at` may lead the server clock before
 /// it is clamped. Large enough for modest device skew, small enough that a
@@ -130,18 +136,11 @@ pub fn row_after_cursor<I: Ord>(
     (applied_at, id) > (cursor_applied_at, cursor_id)
 }
 
-/// Placeholder for the batch outbox apply loop. Phase 1 wires this to
-/// `client_ops` and the per-entity upsert queries; until then it reports
-/// nothing applied so callers cannot accidentally treat it as implemented.
-pub fn apply_outbox_ops_noop() -> Vec<ApplyOutcome> {
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_outbox_ops_noop, clamp_client_timestamp, idempotency_check, incoming_wins,
-        row_after_cursor, ApplyOutcome, Idempotency, MAX_CLIENT_CLOCK_SKEW_MINUTES,
+        clamp_client_timestamp, idempotency_check, incoming_wins, row_after_cursor, ApplyOutcome,
+        Idempotency, MAX_CLIENT_CLOCK_SKEW_MINUTES,
     };
     use chrono::{Duration, TimeZone, Utc};
     use uuid::Uuid;
@@ -164,11 +163,6 @@ mod tests {
     fn ties_keep_the_stored_row() {
         let at = Utc.with_ymd_and_hms(2026, 10, 14, 12, 0, 0).unwrap();
         assert!(!incoming_wins(at, at));
-    }
-
-    #[test]
-    fn noop_returns_no_outcomes() {
-        assert!(apply_outbox_ops_noop().is_empty());
     }
 
     #[test]

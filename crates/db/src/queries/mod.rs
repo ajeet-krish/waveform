@@ -1,0 +1,14 @@
+//! The entity-generic sync engine: registry, apply, and pull.
+//!
+//! * [`spec`] holds the per-entity SQL registry (static builders only).
+//! * [`sync_apply`] claims each pushed op into `client_ops` and upserts
+//!   the row in one transaction.
+//! * [`sync_pull`] pages rows out on the `(applied_at, id)` cursor.
+
+pub mod spec;
+pub mod sync_apply;
+pub mod sync_pull;
+
+pub use spec::{spec_for, EntitySpec, ParentCheck};
+pub use sync_apply::{apply_op, apply_ops, ApplyError};
+pub use sync_pull::{parse_cursor, pull_page, PullParams};

@@ -5,8 +5,11 @@
 //! to apply migrations and exit (used by CI and deploy hooks).
 
 mod config;
+mod error;
 mod routes;
 mod state;
+
+use std::sync::Arc;
 
 use anyhow::Context;
 use tracing_subscriber::EnvFilter;
@@ -19,12 +22,15 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     init_tracing();
 
-    let config = Config::from_env().context("failed to load configuration")?;
-    let pool = waveform_db::connect(&config.database_url)
-        .await
-        .context("failed to connect to Postgres")?;
-
+    // The migrate subcommand only needs the database: session and CORS
+    // config are validated when serving, so CI and deploy hooks stay
+    // env-light (DATABASE_URL alone).
     if std::env::args().any(|arg| arg == "migrate") {
+        let database_url =
+            Config::database_url_from_env().context("failed to load configuration")?;
+        let pool = waveform_db::connect(&database_url)
+            .await
+            .context("failed to connect to Postgres")?;
         waveform_db::run_migrations(&pool)
             .await
             .context("failed to run migrations")?;
@@ -32,13 +38,26 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let config = Arc::new(Config::from_env().context("failed to load configuration")?);
+    tracing::info!(origin = %config.allowed_web_origin, "web origin configured");
+    tracing::debug!(
+        secret_len = config.session_secret.len(),
+        "session secret loaded"
+    );
+    let pool = waveform_db::connect(&config.database_url)
+        .await
+        .context("failed to connect to Postgres")?;
+
     if config.run_migrations {
         waveform_db::run_migrations(&pool)
             .await
             .context("failed to run migrations")?;
     }
 
-    let app = routes::router(AppState { pool });
+    let app = routes::router(AppState {
+        pool,
+        config: Arc::clone(&config),
+    });
     let listener = tokio::net::TcpListener::bind((config.host.as_str(), config.port))
         .await
         .context("failed to bind TCP listener")?;

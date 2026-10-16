@@ -16,15 +16,23 @@ use sqlx::FromRow;
 use ts_rs::TS;
 use uuid::Uuid;
 
-/// A registered user. Signup is invite-only. Owner-only surface: renders
-/// other users through [`PublicUser`] in feeds, leaderboards, and heatmaps.
+/// A registered user with an email + password account (ADR 2026-10-15:
+/// no OTP, no MFA, no email verification, no GitHub OAuth). Owner-only
+/// surface: renders other users through [`PublicUser`] in feeds,
+/// leaderboards, and heatmaps.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
 #[ts(export_to = "generated.ts")]
 pub struct User {
     pub id: Uuid,
     pub email: String,
     pub display_name: String,
-    /// Linked GitHub account for OAuth login, if any.
+    /// Argon2id PHC hash of the password (bucket 2 writes it). Never
+    /// serialized: it must not reach a JSON response or the wire types.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub password_hash: Option<String>,
+    /// Linked GitHub account from the retired OAuth design; kept for the
+    /// schema, unused by the email + password flow.
     pub github_id: Option<String>,
     pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -126,6 +134,9 @@ pub struct Exercise {
     pub equipment: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Server-stamped sync cursor timestamp; never client-writable
+    /// (added by migrations/0006 so custom exercises join the pull).
+    pub applied_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
