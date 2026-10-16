@@ -8,12 +8,12 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /healthz
-    # Apply pending migrations with the API's migrate subcommand before
-    # the new instance takes traffic; it only needs DATABASE_URL.
-    preDeployCommand: waveform-api migrate
-    # Fallback start command, used only if the Dockerfile CMD is ever
-    # overridden; uncomment to pin it:
-    # startCommand: waveform-api
+    # The Render free tier rejects pre-deploy commands, and the project
+    # contract keeps production off DDL on boot (RUN_MIGRATIONS stays
+    # false). Apply migrations explicitly from a machine with DATABASE_URL
+    # set: cargo run -p waveform-api -- migrate
+    # On a paid plan, restore automation with:
+    #   preDeployCommand: waveform-api migrate
     envVars:
       # Neon connection string, pasted into the Render dashboard (never
       # committed; sync: false means "set manually, not from the repo").

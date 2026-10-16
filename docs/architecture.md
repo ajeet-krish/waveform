@@ -70,7 +70,7 @@ waveform/
 ├── migrations/                 # SQLx .sql (0001_init.sql, 0002_seed_catalog.sql, ...)
 ├── infra/                      # docker-compose (Postgres + Mailpit), railway.toml (superseded)
 ├── Dockerfile                  # multi-stage API image for Render
-├── render.yaml                 # Render web service: docker, free, pre-deploy migrate
+├── render.yaml                 # Render web service: docker, free, manual migrations
 ├── scripts/                    # invite CLI (api subcommand), restore drill
 └── docs/                       # architecture.md, decisions.md, research.md, reviews.md, tests.md
 ```
@@ -288,9 +288,9 @@ with `ca-certificates`, `EXPOSE 8080`, and `CMD waveform-api` (the platform inje
 Postgres runs on Neon (free tier); `render.yaml` describes the service:
 
 - `runtime: docker`, `plan: free`, `healthCheckPath: /healthz`.
-- `preDeployCommand: waveform-api migrate` applies migrations as an explicit release step
-  before traffic shifts; the fallback start command, only needed if the image CMD is
-  overridden, is `startCommand: waveform-api` (documented as a comment in the file).
+- Migrations: the Render free tier rejects pre-deploy commands, so apply them explicitly from
+  a machine with `DATABASE_URL` set (`cargo run -p waveform-api -- migrate`); a paid plan can
+  restore automation with `preDeployCommand: waveform-api migrate`.
 - Environment: `DATABASE_URL` and `SESSION_SECRET` (`sync: false`, pasted into the Render
   dashboard; generate the secret with `openssl rand -hex 32`), `ALLOWED_WEB_ORIGIN=https://ajeet-krish.github.io`,
   `RUN_MIGRATIONS=false` (production never runs DDL on boot), and `RUST_LOG`.
