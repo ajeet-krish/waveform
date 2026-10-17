@@ -31,7 +31,7 @@ import {
   type Accessor,
   type JSX,
 } from "solid-js";
-import type { LoginRequest, SignupRequest } from "@waveform/api-types";
+import type { BoardWindow, BoardsResponse, LoginRequest, SignupRequest } from "@waveform/api-types";
 import { createRepos, db, ensureCatalog, LocalValidationError, type Repos } from "../db";
 import type { LocalProfile } from "../db/types";
 import { createApiClient, resolveApiBaseUrl, type ApiClient } from "./api";
@@ -126,6 +126,12 @@ export type AppData = {
   /** Session state and the sign-in surface. */
   auth: AuthStore;
   account: AccountActions;
+  /**
+   * Fetches the server-aggregated leaderboard boards for one window.
+   * Throws the resolver's message when no API address is configured and an
+   * ApiError when the call fails; the caller renders both.
+   */
+  boards(window: BoardWindow): Promise<BoardsResponse>;
   /**
    * True when this device still owes the account its data choice, null
    * while that check is in flight, false otherwise (signed out, already
@@ -501,6 +507,10 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     await engine.start();
   }
 
+  async function boards(window: BoardWindow): Promise<BoardsResponse> {
+    return currentClient().boards(window);
+  }
+
   async function setApiBaseUrl(raw: string): Promise<void> {
     const trimmed = raw.trim();
     if (trimmed.length === 0) {
@@ -601,6 +611,7 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     retryBootstrap,
     auth,
     account,
+    boards,
     adoptionNeeded,
     deviceOwnership,
     writeBlocked: () => isWriteBlocked(deviceOwnership()),

@@ -14,6 +14,8 @@
 import type {
   ApiErrorCode,
   AuthResponse,
+  BoardWindow,
+  BoardsResponse,
   LoginRequest,
   PullPage,
   PushOp,
@@ -132,6 +134,8 @@ export type ApiClient = {
   me(): Promise<User>;
   push(ops: PushOp[]): Promise<PushResponse>;
   pull(params: PullParams): Promise<PullPage>;
+  /** Server-aggregated social boards for one trailing window. */
+  boards(window: BoardWindow): Promise<BoardsResponse>;
 };
 
 export type ApiClientOptions = {
@@ -290,6 +294,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         query.set("limit", String(params.limit));
       }
       return send<PullPage>(`/sync/pull?${query.toString()}`, "GET") as Promise<PullPage>;
+    },
+    boards(window: BoardWindow): Promise<BoardsResponse> {
+      const query = new URLSearchParams({ window });
+      return send<BoardsResponse>(
+        `/social/boards?${query.toString()}`,
+        "GET",
+      ) as Promise<BoardsResponse>;
     },
   };
 }

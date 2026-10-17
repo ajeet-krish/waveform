@@ -14,7 +14,7 @@ export default function SocialLayout(props: RouteSectionProps) {
       <PageHeader
         path="Group / Social"
         title="Social"
-        lede="Boards, the effort grid, and your group's feed. Your group's boards and feed arrive in Phase 3."
+        lede="Boards rank the crew across consistency, lifting, cycling, and climbing. The effort grid stays local to this device, and the feed arrives with a later phase."
       />
       <nav class="seg" aria-label="Social views">
         <For each={SUB_SECTIONS}>

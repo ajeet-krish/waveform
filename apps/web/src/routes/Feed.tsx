@@ -6,7 +6,7 @@ export default function Feed() {
     <div class="stack">
       <EmptyState
         title="Nothing from the group yet"
-        body="Finished sessions and kudos land here. Your group's boards and feed arrive in Phase 3."
+        body="Finished sessions and kudos land here. The group feed arrives with a later phase."
         actions={[{ label: "See the boards", href: "/social/leaderboard" }]}
       />
       <Panel label="How kudos work">

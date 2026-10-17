@@ -378,6 +378,11 @@ a.discipline:hover {
   background: var(--console-high);
 }
 
+/* Zero rows on a board stay quiet: the figure is honest, not a headline. */
+.data-table td.is-empty {
+  color: var(--paper-faint);
+}
+
 /* Sparkline: one series across days; magenta means live data, amber a record */
 
 .sparkline {

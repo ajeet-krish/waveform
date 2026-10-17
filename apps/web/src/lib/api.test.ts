@@ -297,4 +297,28 @@ describe("createApiClient", () => {
     const api = createApiClient({ baseUrl: "https://api.test", token: "tok", fetchFn });
     await expect(api.logout()).resolves.toBeUndefined();
   });
+
+  it("boards fetch the window on a GET and read the generated response", async () => {
+    const { fetchFn, calls } = recordingFetch([
+      jsonResponse(200, {
+        window: "4w",
+        marquee_lifts: ["Back Squat"],
+        consistency: [],
+        lifting: { volume: [], e1rm: [], relative_e1rm: [] },
+        cycling: { distance: [], elevation: [] },
+        climbing: [],
+      }),
+    ]);
+    const api = createApiClient({ baseUrl: "https://api.test", token: "tok", fetchFn });
+
+    const response = await api.boards("4w");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://api.test/social/boards?window=4w");
+    expect(calls[0]?.init.method).toBe("GET");
+    const headers = calls[0]?.init.headers as unknown as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok");
+    expect(response.window).toBe("4w");
+    expect(response.marquee_lifts).toEqual(["Back Squat"]);
+  });
 });
