@@ -52,9 +52,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateE
 #[cfg(test)]
 mod export_tests {
     use crate::dto::{
-        ActivityRules, ApiErrorBody, ApiErrorCode, AuthResponse, BodyRules, LoginRequest, OpAction,
-        OpResult, OpStatus, PasswordRules, PullPage, PullRow, PushOp, PushRequest, PushResponse,
-        RoutineRules, RuleConstants, SetRules, SignupRequest, SyncEntity, SyncLimits,
+        ActivityRules, ApiErrorBody, ApiErrorCode, AuthResponse, BoardWindow, BoardsResponse,
+        BodyRules, ClimbingBoardEntry, ConsistencyBoardEntry, CyclingBoards, CyclingDistanceEntry,
+        CyclingElevationEntry, LiftingBoards, LiftingVolumeEntry, LoginRequest, MarqueeLiftBoard,
+        MarqueeLiftEntry, OpAction, OpResult, OpStatus, PasswordRules, PullPage, PullRow, PushOp,
+        PushRequest, PushResponse, RelativeE1rmEntry, RoutineRules, RuleConstants, SetRules,
+        SignupRequest, SyncEntity, SyncLimits,
     };
     use crate::{
         Activity, ActivityType, BodyStats, Challenge, Exercise, ExerciseEntry, Group, GroupMember,
@@ -99,6 +102,19 @@ mod export_tests {
             SignupRequest::export(),
             LoginRequest::export(),
             AuthResponse::export(),
+            // Phase 4 social board DTOs.
+            BoardWindow::export(),
+            ConsistencyBoardEntry::export(),
+            LiftingVolumeEntry::export(),
+            MarqueeLiftBoard::export(),
+            MarqueeLiftEntry::export(),
+            RelativeE1rmEntry::export(),
+            CyclingDistanceEntry::export(),
+            CyclingElevationEntry::export(),
+            ClimbingBoardEntry::export(),
+            LiftingBoards::export(),
+            CyclingBoards::export(),
+            BoardsResponse::export(),
             // Rule trees.
             SetRules::export(),
             ActivityRules::export(),

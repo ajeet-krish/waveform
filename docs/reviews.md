@@ -1297,3 +1297,94 @@ reused.
 - Confirm copy for discarding a queued mutation should account for the outbox's full-row
   payload model: a later op for the same row can still carry the "discarded" state to the
   server.
+
+## 2026-10-16 - Tier 4.1a boards read API (code review)
+
+Verdict: PASS WITH ISSUES. Scope: uncommitted Phase 4.1a changes, the social boards read
+API: NEW crates/analytics/src/boards.rs (pure ranking + metrics), NEW
+crates/db/src/queries/boards.rs (SQL aggregates), crates/db/src/dto.rs (board DTOs,
+BoardWindow), crates/db/src/lib.rs (export list), crates/db/src/models.rs (PublicUser +
+PartialEq), NEW crates/db/tests/boards_queries.rs, NEW apps/api/tests/social_routes.rs,
+apps/api/src/routes/social.rs (router + handler), Cargo manifests (+waveform-scoring in
+analytics, +waveform-analytics in api), packages/api-types/src/generated.ts (regenerated),
+Cargo.lock. Static review only, no shell in this environment.
+
+Privacy trace (highest priority) passes the binding as written. Every response field was
+traced: BoardsResponse carries window, marquee_lifts, and entries whose only member
+identity is PublicUser (id, display_name, avatar_url; models.rs:46-52). No DTO field holds
+an email or a body_stats column; the User type (with email) never appears in the boards
+surface. latest_bodyweight (queries/boards.rs:140-154) is the only body_stats read; its
+(Uuid, f64) rows are consumed in lifting_boards (social.rs:211-233) purely as the divisor,
+RelativeE1rmInput is dropped inside relative_e1rm_board, and only RelativeE1rmEntry
+{rank, user, ratio} serializes (dto.rs:312-319). Ordering and tie-breaks add nothing
+beyond the ratio (tiebreak is constant 0). One residual noted below: the ratio is exactly
+invertible against the marquee boards in the same response, which is inherent to showing
+absolute and relative boards together and needs a product decision.
+
+SQL trace: window bounds are start = end - (days - 1) with inclusive BETWEEN over
+local_date (7d covers exactly seven calendar days); weeks come from date_trunc('week'),
+which is ISO Monday-start (verified against the 2026-01-05 Monday fixture in
+boards_queries.rs:198-217). Tombstone exclusion covers users (all eight queries),
+workout_sessions, activities, body_stats, and set/exercise entries, but not exercises.
+Working sets only via se.is_warmup = false in both lifting queries; marquee matching uses
+lower(e.name) against a parameterized unnest of parallel alias arrays and folds onto the
+canonical lift with GROUP BY user, canonical and max(se.e1rm_kg), the generated Brzycki
+column (migrations/0003). Seed-catalog spellings ("Squat (Barbell)", "Back Squat",
+"Bench Press (Barbell)", "Deadlift (Barbell)", "Deadlift", "Overhead Press (Barbell)",
+"Overhead Press") all match; near-misses ("Front Squat", "Sumo Deadlift", "Close Grip
+Bench Press") correctly do not. All queries are static or fully bound; no injection
+surface. No N+1: eight fixed set-based aggregates per request, fine at friend scale.
+
+Ranking trace matches the locked ADR (docs/decisions.md 2026-10-14): shared ranks read
+1, 2, 2, 4 (stable sort, tie group keeps input order), Consistency tie-breaks on the
+weekly streak of weeks with >= 3 active days (MIN_STREAK_WEEK_ACTIVE_DAYS = 3), climbing
+tie-breaks on hardest grade, V-points reuse waveform_scoring::v_points (count * 2^grade
+with 0..=16 clamps), and the relative ratio drops non-finite or non-positive bodyweights
+instead of dividing. All unit-tested.
+
+Route trace: GET /social/boards sits behind AuthUser (401 with the standard envelope for
+missing and unknown tokens), unknown or empty windows answer 400 bad_request, an absent
+window defaults to 7d, and the router merges social before the body-limit and CORS layers
+(routes/mod.rs:42-51). sqlx failures map to a generic "database error" 500. No panic
+paths in the handler.
+
+DTO/ts-rs trace: every board DTO derives TS and appears in the export_ts list
+(crates/db/src/lib.rs:106-117); generated.ts matches the Rust shapes field for field
+(BoardWindow = "7d" | "4w" | "12w"). The change is additive (PublicUser's PartialEq is
+Rust-only). export_ts drift should stay green; not executed here.
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | apps/api/src/routes/social.rs:211-217 with crates/db/src/dto.rs:304-308, 312-319 | Privacy residual: the relative board's ratio is exactly invertible against the marquee boards in the same response. relative_e1rm uses best = max over the per-lift bests, and those per-lift bests are published as best_e1rm_kg, so bodyweight = best / ratio is recovered exactly for every member on the relative board. The binding as written (no body_stats column, ratio only) is met, but the value is derivable. | Round the ratio (for example to two decimals) before ranking and exposing so recovery is approximate, or drop members' absolute e1RM from responses that include the relative board, or accept explicitly and record the decision in the ADR and the privacy note. |
+| Medium | crates/db/src/queries/boards.rs:120-127 | marquee_best_e1rm joins exercises without e.deleted_at IS NULL, so a tombstoned (custom) exercise still contributes sets to the marquee and relative boards. This contradicts the module header claim that every query is scoped to non-tombstoned rows (boards.rs:6-7) and the tier's tombstone contract. | Add AND e.deleted_at IS NULL to the WHERE clause (or state deliberately that historical sets under a deleted exercise still count and fix the header claim). |
+| Medium | apps/api/tests/social_routes.rs:128-178 | The privacy assertions are near-trivial: the fixture never creates a body_stats row or a marquee set, so the substring scans ("weight_kg", "bodyweight", "bodyfat", "@social.test") cannot catch a value leak, the relative board is empty end to end, and no bodyweight number is ever in play. | Seed a distinctive bodyweight (say 72.5) and a marquee set for one of two accounts, assert the relative entry's ratio equals best / 72.5, assert "72.5" never appears in the serialized body, and assert the second account's email is absent. |
+| Medium | crates/db/tests/boards_queries.rs (suite-wide) | Tombstone exclusion is proven only for users (crew_lists_only_live_users). No test tombstones a workout_sessions, activities, set_entries, exercise_entries, or body_stats row, so the deleted_at filters in ACTIVE_DAY_ROWS, lifting_volume, marquee_best_e1rm, latest_bodyweight, cycling_totals, and climbing_sends are unverified. | Add a fixture with a tombstoned session, activity, set, and body_stats row and assert none of them move any board number. |
+| Low | crates/db/src/queries/boards.rs:185 | climb_grade_value is double precision and the CHECK allows fractional grades (migrations/0003_hardening.sql:32, 218-219), but a.climb_grade_value::int rounds (half away from zero), so a logged 4.5 becomes 5 and inflates both V-points (2^5 vs 2^4.5) and hardest_grade. | Use floor or trunc, or add an integer-grade CHECK (or reject fractional grades at write) so the i32 V-scale is enforced end to end. |
+| Low | apps/api/src/routes/social.rs:62 | The 400 message echoes the raw query value (format!("unknown board window: {raw}")), reflecting unbounded untrusted input into the error envelope. | Use a static message, or truncate raw to a short fixed length before echoing. |
+| Low | crates/db/src/queries/boards.rs:176-192 | climbing_sends documents "per member and grade" but returns one row per activity, so the same grade appears multiple times. Harmless today because climbing_points sums and hardest_grade takes a max over duplicate pairs (social.rs:315-321), but the shape is a trap for future callers. | GROUP BY a.user_id, grade with sum, or fix the doc comment to say per-activity rows. |
+| Low | apps/api/src/routes/social.rs:65-68 | The window ends on the server UTC date while rows group by device-local local_date; a member ahead of UTC has "today local" rows excluded until UTC catches up. | Accept an optional as_of (or client date) parameter, or document the server-date boundary next to the local_date convention. |
+| Low | docs/decisions.md:146 vs crates/db/src/queries/boards.rs:81-101 | The ADR says lifting "weekly volume"; the board ranks and reports window-total volume. Ordering is identical over a fixed window, so behavior is defensible, but the exposed value and the ADR wording disagree. | Clarify the ADR (or the LiftingVolumeEntry doc) to say window-total volume. |
+| Low | apps/api/tests/social_routes.rs; crates/db/tests/boards_queries.rs:245-309 | Test gaps: the marquee query's is_warmup = false filter is untested (the marquee fixture inserts only working sets), and the route suite is single-account, so shared ranks and tie-breaks are never observed over the wire. | Add a warmup set to the marquee fixture and one two-account route test asserting tied ranks share a number. |
+
+### Verification Checklist
+- [x] Privacy binding: no body_stats column, no email, PublicUser the only member identity; ratio computed server-side from a bodyweight that is never serialized (invertibility residual tabled above)
+- [x] SQL: window bounds inclusive, Monday-start weeks, warmup filtering, group-by-user, generated e1rm_kg, marquee alias folding, hardest grade, V-points; all queries static or bound
+- [x] Tombstone exclusion verified for users, sessions, activities, body_stats; FAIL row for exercises above
+- [x] Ranking: shared ranks (1, 2, 2, 4), consistency streak tie-break, climbing hardest-grade tie-break, ratio guards, all matching the ADR
+- [x] Route: 401 auth, 400 unknown window, 7d default, error envelope, CORS and body-limit still applied, no panic paths
+- [x] DTO/ts-rs: exported types match the handler; BoardWindow additive; export_ts drift check consistent on inspection (not executed)
+- [x] Tests prove shared ranks, streak, V-points, ratio guards, crew scoping, Monday grouping, 401/400/200; weakened privacy assertion and tombstone gap tabled above
+- [x] No em dashes, double hyphens, or dash equivalents in prose
+- [x] Phase code integrates cleanly with prior phases (social router merges with the existing auth, sync, workout, activity surface)
+
+### Recurring patterns for other agents
+- A privacy rule stated as "field X never appears" must also be checked as a derivation:
+  when a response publishes both an absolute metric and a ratio built from a private
+  divisor, the divisor is recoverable by division. Round the ratio or pick one of the two
+  boards.
+- When a query module claims "every query is scoped to non-tombstoned rows", grep each
+  JOIN: the dimension table (exercises here) is the one that gets forgotten, because the
+  fact tables carry the deleted_at filters naturally.
+- Privacy assertions in route tests need fixtures that actually hold the private value (a
+  distinctive bodyweight number); substring scans over responses built from empty fixtures
+  prove nothing.

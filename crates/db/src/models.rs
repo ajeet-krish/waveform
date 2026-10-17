@@ -43,7 +43,7 @@ pub struct User {
 /// A user as other members see them: the only fields safe for cross-user
 /// surfaces (feed, leaderboard, heatmap, kudos). Never carries email or
 /// GitHub identity.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow, TS)]
 #[ts(export_to = "generated.ts")]
 pub struct PublicUser {
     pub id: Uuid,

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::models::User;
+use crate::models::{PublicUser, User};
 
 /// Syncable entity names, byte for byte the client's `OutboxEntity`
 /// strings plus the routine pair Phase 2 adds.
@@ -223,6 +223,162 @@ pub struct AuthResponse {
     pub token: String,
     pub expires_at: DateTime<Utc>,
     pub user: User,
+}
+
+/// Board windows: trailing days ending today, Monday-start weeks. `7d` is
+/// one week, `4w` and `12w` are 28 and 84 days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "generated.ts")]
+pub enum BoardWindow {
+    #[serde(rename = "7d")]
+    Days7,
+    #[serde(rename = "4w")]
+    Weeks4,
+    #[serde(rename = "12w")]
+    Weeks12,
+}
+
+impl BoardWindow {
+    /// Every window, shortest first.
+    pub const ALL: [BoardWindow; 3] = [
+        BoardWindow::Days7,
+        BoardWindow::Weeks4,
+        BoardWindow::Weeks12,
+    ];
+
+    /// The wire string; also the `?window=` query value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BoardWindow::Days7 => "7d",
+            BoardWindow::Weeks4 => "4w",
+            BoardWindow::Weeks12 => "12w",
+        }
+    }
+
+    /// Parse the wire string; unknown values are rejected by the handler.
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|window| window.as_str() == raw)
+    }
+
+    /// Length of the trailing window in days.
+    pub fn days(self) -> i64 {
+        match self {
+            BoardWindow::Days7 => 7,
+            BoardWindow::Weeks4 => 28,
+            BoardWindow::Weeks12 => 84,
+        }
+    }
+}
+
+/// One ranked member on the Consistency board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct ConsistencyBoardEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub active_days: i32,
+    pub weekly_streak: i32,
+}
+
+/// One ranked member on the lifting-volume board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct LiftingVolumeEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub volume_kg: f64,
+}
+
+/// The absolute-e1RM board for one marquee lift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct MarqueeLiftBoard {
+    pub lift: String,
+    pub entries: Vec<MarqueeLiftEntry>,
+}
+
+/// One ranked member on one marquee-lift e1RM board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct MarqueeLiftEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub best_e1rm_kg: f64,
+}
+
+/// One ranked member on the relative-e1RM board. Only the ratio travels,
+/// rounded to two decimals; the bodyweight it divides out is never
+/// exposed and is only approximately recoverable from the published
+/// absolute board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct RelativeE1rmEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    /// Best marquee-lift e1RM divided by bodyweight, rounded to two
+    /// decimals.
+    pub ratio: f64,
+}
+
+/// One ranked member on the cycling-distance board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct CyclingDistanceEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub distance_km: f64,
+}
+
+/// One ranked member on the cycling-elevation board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct CyclingElevationEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub elevation_m: f64,
+}
+
+/// One ranked member on the climbing board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct ClimbingBoardEntry {
+    pub rank: u32,
+    pub user: PublicUser,
+    pub v_points: f64,
+    pub hardest_grade: Option<i32>,
+}
+
+/// The lifting discipline's three boards.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct LiftingBoards {
+    pub volume: Vec<LiftingVolumeEntry>,
+    pub e1rm: Vec<MarqueeLiftBoard>,
+    pub relative_e1rm: Vec<RelativeE1rmEntry>,
+}
+
+/// The cycling discipline's two boards.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct CyclingBoards {
+    pub distance: Vec<CyclingDistanceEntry>,
+    pub elevation: Vec<CyclingElevationEntry>,
+}
+
+/// `GET /social/boards` response: every ranked board for one window, plus
+/// the marquee-lift list so the client never duplicates it. No entry ever
+/// carries an email or a body_stats column; members appear as
+/// [`PublicUser`] only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "generated.ts")]
+pub struct BoardsResponse {
+    pub window: BoardWindow,
+    pub marquee_lifts: Vec<String>,
+    pub consistency: Vec<ConsistencyBoardEntry>,
+    pub lifting: LiftingBoards,
+    pub cycling: CyclingBoards,
+    pub climbing: Vec<ClimbingBoardEntry>,
 }
 
 /// `set_entries` CHECK bounds, mirroring `SET_RULES` in
@@ -452,6 +608,28 @@ mod tests {
             (200, 500),
         );
         assert_eq!(rules.password.min_password_length, 10);
+    }
+
+    #[test]
+    fn board_window_parses_and_measures_its_days() {
+        assert_eq!(
+            super::BoardWindow::parse("7d"),
+            Some(super::BoardWindow::Days7)
+        );
+        assert_eq!(
+            super::BoardWindow::parse("4w"),
+            Some(super::BoardWindow::Weeks4)
+        );
+        assert_eq!(
+            super::BoardWindow::parse("12w"),
+            Some(super::BoardWindow::Weeks12)
+        );
+        assert_eq!(super::BoardWindow::parse("1d"), None);
+        assert_eq!(super::BoardWindow::parse(""), None);
+        assert_eq!(super::BoardWindow::Days7.days(), 7);
+        assert_eq!(super::BoardWindow::Weeks4.days(), 28);
+        assert_eq!(super::BoardWindow::Weeks12.days(), 84);
+        assert_eq!(super::BoardWindow::Days7.as_str(), "7d");
     }
 
     #[test]

@@ -49,6 +49,20 @@ export type ApiErrorCode = "bad_request" | "unauthorized" | "forbidden" | "not_f
 export type AuthResponse = { token: string, expires_at: string, user: User, };
 
 /**
+ * Board windows: trailing days ending today, Monday-start weeks. `7d` is
+ * one week, `4w` and `12w` are 28 and 84 days.
+ */
+export type BoardWindow = "7d" | "4w" | "12w";
+
+/**
+ * `GET /social/boards` response: every ranked board for one window, plus
+ * the marquee-lift list so the client never duplicates it. No entry ever
+ * carries an email or a body_stats column; members appear as
+ * [`PublicUser`] only.
+ */
+export type BoardsResponse = { window: BoardWindow, marquee_lifts: Array<string>, consistency: Array<ConsistencyBoardEntry>, lifting: LiftingBoards, cycling: CyclingBoards, climbing: Array<ClimbingBoardEntry>, };
+
+/**
  * `body_stats` CHECK bounds, mirroring `BODY_RULES`.
  */
 export type BodyRules = { 
@@ -92,6 +106,31 @@ group_id: string | null, created_by: string, created_at: string, updated_at: str
  * Server-stamped sync cursor timestamp; never client-writable.
  */
 applied_at: string, deleted_at: string | null, };
+
+/**
+ * One ranked member on the climbing board.
+ */
+export type ClimbingBoardEntry = { rank: number, user: PublicUser, v_points: number, hardest_grade: number | null, };
+
+/**
+ * One ranked member on the Consistency board.
+ */
+export type ConsistencyBoardEntry = { rank: number, user: PublicUser, active_days: number, weekly_streak: number, };
+
+/**
+ * The cycling discipline's two boards.
+ */
+export type CyclingBoards = { distance: Array<CyclingDistanceEntry>, elevation: Array<CyclingElevationEntry>, };
+
+/**
+ * One ranked member on the cycling-distance board.
+ */
+export type CyclingDistanceEntry = { rank: number, user: PublicUser, distance_km: number, };
+
+/**
+ * One ranked member on the cycling-elevation board.
+ */
+export type CyclingElevationEntry = { rank: number, user: PublicUser, elevation_m: number, };
 
 /**
  * An exercise: a global catalog row (`owner_id` null) or a per-user custom
@@ -142,10 +181,30 @@ export type Kudos = { id: string, workout_id: string, user_id: string, created_a
 applied_at: string, deleted_at: string | null, };
 
 /**
+ * The lifting discipline's three boards.
+ */
+export type LiftingBoards = { volume: Array<LiftingVolumeEntry>, e1rm: Array<MarqueeLiftBoard>, relative_e1rm: Array<RelativeE1rmEntry>, };
+
+/**
+ * One ranked member on the lifting-volume board.
+ */
+export type LiftingVolumeEntry = { rank: number, user: PublicUser, volume_kg: number, };
+
+/**
  * `POST /auth/login`: email + password sign-in. A NULL
  * `users.password_hash` never authenticates.
  */
 export type LoginRequest = { email: string, password: string, };
+
+/**
+ * The absolute-e1RM board for one marquee lift.
+ */
+export type MarqueeLiftBoard = { lift: string, entries: Array<MarqueeLiftEntry>, };
+
+/**
+ * One ranked member on one marquee-lift e1RM board.
+ */
+export type MarqueeLiftEntry = { rank: number, user: PublicUser, best_e1rm_kg: number, };
 
 /**
  * One outbox op action as it travels on the wire.
@@ -218,6 +277,19 @@ export type PushRequest = { ops: Array<PushOp>, };
  * `POST /sync/push` response body: one result per op, in order.
  */
 export type PushResponse = { results: Array<OpResult>, };
+
+/**
+ * One ranked member on the relative-e1RM board. Only the ratio travels,
+ * rounded to two decimals; the bodyweight it divides out is never
+ * exposed and is only approximately recoverable from the published
+ * absolute board.
+ */
+export type RelativeE1rmEntry = { rank: number, user: PublicUser, 
+/**
+ * Best marquee-lift e1RM divided by bodyweight, rounded to two
+ * decimals.
+ */
+ratio: number, };
 
 /**
  * A reusable workout template.

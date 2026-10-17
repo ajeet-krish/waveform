@@ -8,6 +8,7 @@ description = "Aggregation queries and metrics for boards, heatmap, and history"
 [dependencies]
 chrono.workspace = true
 serde.workspace = true
+waveform-scoring.workspace = true
 
 [lints]
 workspace = true

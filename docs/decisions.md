@@ -1,6 +1,6 @@
 # Waveform Decision Records
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 Status markers: [LOCKED] current and binding, [SUPERSEDED] replaced by a later ADR (kept for
 history only), [SUPERSEDED IN PART], [HISTORICAL] provisional record later finalized.
@@ -626,3 +626,33 @@ safety net needs no new merge logic.
 stale at friend scale, and merges are idempotent). An aborted due run leaves the pending
 flag set and the stored cursors in place, so the next run degrades to an incremental
 resume and eventually completes rather than storming the full walk on every attempt.
+
+## 2026-10-16 - Phase 3: Relative e1RM board rounds the ratio; approximate bodyweight inversion accepted at friend scale
+
+**Status: LOCKED. Extends the 2026-10-14 "Scoring model finalized" ADR (relative e1RM /
+bodyweight) with the privacy handling for publishing it beside the absolute board.**
+
+**Context**: The relative-e1RM board divides each member's best marquee-lift e1RM by their
+bodyweight and publishes only the ratio, and `body_stats` is owner-private (no body_stats
+column and no bodyweight is ever serialized). But the same response also publishes the
+absolute best e1RM per marquee lift, and the relative ratio uses the member's best across
+those lifts. The two values are therefore exactly invertible: bodyweight = best_e1rm / ratio
+recovers the private divisor to full precision.
+
+**Decision**: Round the exposed relative-e1RM ratio to two decimals and rank on the rounded
+value, so the published ratio no longer inverts to the exact bodyweight. Keep the raw
+bodyweight unexported: it is read server-side only to compute the ratio, and no DTO field,
+log, or response carries it.
+
+**Rationale**: At friend-group scale the absolute boards are meant to be public, and the
+relative board is the more interesting number; dropping either board would cost real product
+value for a marginal privacy gain. Two-decimal rounding keeps the ratio honest for ranking
+while making the recovered bodyweight approximate rather than exact. The residual is small
+and, in a cohort of friends who already know roughly what each other weighs, low impact.
+
+**Trade-offs**: Approximate inversion remains possible: combining the published absolute best
+e1RM with the rounded ratio still recovers bodyweight to within about one percent, and
+rounding can also merge ratios that differ below 0.01 into a shared rank. Accepted for a
+small friend cohort. If the group grows or a member asks for stricter privacy, the fallback
+is to drop the absolute marquee boards from responses that include the relative board, or to
+stop publishing the relative board entirely; both are recorded here as the escape hatches.
