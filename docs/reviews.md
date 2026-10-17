@@ -1235,3 +1235,65 @@ elevation coherence and the cross-form validation consistency items above.
 - A summary should speak every figure its form captures (hike elevation was logged but
   never shown); when a form grows a field, walk the summary, card, and blurb surfaces with
   it.
+
+## 2026-10-16 - Tier 3 quarantine requeue UI (code review)
+
+Verdict: PASS WITH ISSUES. Scope: uncommitted Tier 3 changes, the paused-changes (quarantine)
+requeue UI: NEW apps/web/src/lib/sync/quarantine.ts (+ quarantine.test.ts), NEW
+components/sync/QuarantineList.tsx, db/outbox.ts (+ outbox.test.ts), lib/sync/engine.ts
+(+ engine.test.ts), lib/appData.tsx, routes/Account.tsx, styles/app.css. Static review only,
+no shell.
+
+Core claims verified: requeue resets attempts, clears last_error, and un-parks the op in one
+rw transaction (outbox.ts:179-192; outbox.test.ts:179-210) and re-quarantines only at the
+third fresh rejection, not immediately (outbox.ts:91-97; outbox.test.ts:198-205; drain
+attempts a rejected op at most once per drain, drain.ts:161-172); discard deletes the op
+alone and leaves the local row (outbox.ts:194-196; outbox.test.ts:212-232); listQuarantined
+shares the byDrainOrder predicate with listPending and the drain (outbox.ts:151-160;
+ordering test :162-177); requeue's put and discard's delete stay silent to the outbox
+creating hook, so counts flow through refreshCounts (engine.ts:142-147, 227-248, 580;
+engine.test.ts:831-856), which recomputes pending/quarantined without a sync run and is
+read-only, hence safe while the engine is stopped or signed out; the "requeue" SyncReason is
+inert like "manual" (only "online" is special-cased, engine.ts:424-429) and no existing
+reason changed behavior; Discard always opens ConfirmDialog whose copy states the local row
+is kept and the change cannot be undone (QuarantineList.tsx:15-17, 152-185), no other
+discard call site exists, and Retry is non-destructive with no confirm; the view model,
+age buckets, unknown-stamp fallback, reason humanization, and heading/empty copy are
+unit-tested (quarantine.test.ts). Prose carries no em dashes or double hyphens; ConfirmDialog,
+EmptyState, form-details/form-actions/label/btn tokens, and the signal color vocabulary are
+reused.
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | apps/web/src/lib/sync/chip.ts:32-58; components/CommandBar.tsx:12-18 (both outside this tier's diff) | The chip never receives quarantinedCount, so when parked ops exist with an empty queue it reads "synced" (steady green), and the moment ops park (pending 3 to paused) the chip improves from "pending 3" to "synced" while the Account panel warns they will never retry. Counts stay accurate but the chip's claim and the panel disagree. | Pass quarantinedCount into SyncChipInput and render, for example, "3 paused" on the load tone when parked ops exist, or accept and document the design. |
+| Medium | apps/web/src/components/sync/QuarantineList.tsx:38, 40-55, 117 | The heading count comes from the engine's raw outbox scan (recompute reads db.outbox directly) while the entries come from repos.outbox.listQuarantined; when repos() is null (foreign or unknown device ownership, where SyncPanel still mounts per Account.tsx:92-100) or the load throws, the list shows the empty state "Nothing is paused ... every change has reached the server" under a possibly nonzero "Paused changes (N)" heading, a self-contradiction and an untrue reassurance. | Derive the heading from entries().length, or gate the count on a successful load, and give the repos-null or load-failure case its own copy instead of the reassuring empty state. |
+| Low | apps/web/src/lib/sync/engine.ts:446-472, 557-569 | markOutboxFailed records a quarantine with a put (invisible to the creating hook) and the runEpoch early returns in performRun skip the final recompute, so a stop() landing mid-drain after an op parks leaves pendingCount/quarantinedCount stale until the next start, write, or refreshCounts. Narrow window (the SyncPanel usually unmounts around a stop) but it is exactly the count this tier presents. | Call void recompute() from stop() after the in-flight run settles, or move the final recompute into a finally. |
+| Low | apps/web/src/components/sync/QuarantineList.tsx:40-63 | Concurrent load() calls (the quarantinedCount effect plus the explicit await load() in requeue/discard) can resolve out of order, so a stale snapshot can briefly overwrite a newer list. | Add a monotonic load token and drop results from superseded loads, or read the list from a live query. |
+| Low | apps/web/src/components/sync/QuarantineList.tsx:16-17 | The confirm copy "so it never reaches the server" is true of the discarded op, but a later queued op for the same row carries the full row payload and can still push the discarded edit's effects (compaction is one-time, compact.ts:31-60), so the user can be misled about what will land on the server. | Note "unless a later change to the same row is still queued", or make discard drop every op for that row. |
+| Low | apps/web/src/components/sync/QuarantineList.tsx:86-102 vs lib/sync/drain.ts:123-131 | Discard racing an in-flight drain can delete an op already inside the push batch, so the server applies it despite the "never reaches the server" copy. The repo no-ops on the vanished id so nothing crashes. | Document the race in discard's doc comment, or gate discard on the drain not holding the op (likely overkill). |
+| Low | apps/web/src/lib/sync/quarantine.ts:64-74 | REASON_COPY is Record<string, string>, so a new ApiErrorCode silently degrades to "The server said: X." instead of being flagged. | Type it Partial<Record<ApiErrorCode, string>> (import the type) so drift is a compile error to resolve deliberately. |
+| Low | apps/web/src/components/sync/QuarantineList.tsx:166-170 | The failure alert renders inside the details element, so a user who collapses the disclosure mid-action never sees the error. | Render the failure outside the disclosure, or force the disclosure open when failure is set. |
+| Info | apps/web/src/components/sync/QuarantineList.tsx:113 | The sync-quarantine class has no rule in app.css (the styles use .quarantine-*); a harmless hook or leftover. | Style it or drop it. |
+| Info | apps/web/src/components/sync/QuarantineList.tsx:144-159 | Per-row Retry and Discard buttons have no aria-label tying them to their change; screen-reader order supplies the context today. | Optionally add aria-label={`Discard ${entry.summary}`}-style labels. |
+
+### Verification Checklist
+- [x] Outbox correctness: requeue transaction, discard-isolation, drain-order agreement, three-fresh-rejection re-quarantine all verified with test references
+- [x] Counts/chip agreement verified through refreshCounts; stale-count and contradiction windows listed above
+- [x] Engine "requeue" reason inert; refreshCounts safe stopped and signed out
+- [x] UI reactivity, confirm copy, empty state, accessibility, and no-any verified
+- [x] Destructive-action safety: discard always behind ConfirmDialog, no bypass
+- [x] Tests prove ordering, requeue reset and re-quarantine, discard keeps the row, view-model mapping/age/empty, refreshCounts on non-append edits
+- [x] No em dashes or double hyphens; existing components, tokens, and tones reused
+- [x] Phase code integrates cleanly with prior phases
+
+### Recurring patterns for other agents
+- When a view's count comes from one source (engine signals over the raw table) and its rows
+  from another (repo queries behind a possibly-null binding), derive both from the same
+  successful read or give the degraded path its own copy; a count above a reassuring empty
+  state is a self-contradiction.
+- Writes that bypass the creating hook (put/delete) need an explicit count-refresh seam;
+  when that seam is a public method like refreshCounts, audit every early return in the
+  path that normally recomputes (halted runs here) for the stale window it leaves.
+- Confirm copy for discarding a queued mutation should account for the outbox's full-row
+  payload model: a later op for the same row can still carry the "discarded" state to the
+  server.

@@ -159,6 +159,78 @@ describe("createOutboxRepo", () => {
     db.close();
   });
 
+  it("listQuarantined returns only parked ops in drain order", async () => {
+    const db = createWaveformDb(`outbox-list-quarantined-${crypto.randomUUID()}`);
+    const repo = createOutboxRepo(db);
+    await db.outbox.bulkAdd([
+      { ...makeOp("op-q2", "2026-10-14T00:00:02.000Z"), quarantined: true },
+      { ...makeOp("op-q1", "2026-10-14T00:00:01.000Z"), quarantined: true },
+      makeOp("op-pending", "2026-10-14T00:00:00.000Z"),
+      { ...makeOp("op-q3", "2026-10-14T00:00:02.000Z"), quarantined: true },
+    ]);
+
+    const parked = await repo.listQuarantined();
+    expect(parked.map((op) => op.op_id)).toEqual(["op-q1", "op-q2", "op-q3"]);
+    // The pending op never leaks into the parked list.
+    expect(parked.every((op) => op.quarantined === true)).toBe(true);
+    db.close();
+  });
+
+  it("requeue resets attempts and clears the park, re-quarantining after three fresh rejections", async () => {
+    const db = createWaveformDb(`outbox-requeue-${crypto.randomUUID()}`);
+    const repo = createOutboxRepo(db);
+    await db.outbox.add({
+      ...makeOp("op-1", "2026-10-14T00:00:00.000Z"),
+      attempts: 3,
+      last_error: "invalid_payload",
+      quarantined: true,
+    });
+    expect(await repo.listQuarantined()).toHaveLength(1);
+
+    await repo.requeue("op-1");
+    const requeued = await db.outbox.get("op-1");
+    expect(requeued?.attempts).toBe(0);
+    expect(requeued?.last_error).toBeNull();
+    expect(requeued?.quarantined).toBe(false);
+    expect(await repo.listQuarantined()).toHaveLength(0);
+    expect((await repo.listPending()).map((op) => op.op_id)).toEqual(["op-1"]);
+
+    // Three fresh rejections reach the threshold again.
+    await markOutboxFailed(db, "op-1", "invalid_payload");
+    await markOutboxFailed(db, "op-1", "invalid_payload");
+    expect((await db.outbox.get("op-1"))?.quarantined).toBe(false);
+    await markOutboxFailed(db, "op-1", "invalid_payload");
+    expect((await db.outbox.get("op-1"))?.quarantined).toBe(true);
+    expect(await repo.listQuarantined()).toHaveLength(1);
+    expect(await repo.listPending()).toHaveLength(0);
+
+    // An unknown id is a no-op, not a crash.
+    await repo.requeue("op-missing");
+    db.close();
+  });
+
+  it("discard removes only the outbox op, leaving the local row", async () => {
+    const db = createWaveformDb(`outbox-discard-${crypto.randomUUID()}`);
+    const repo = createOutboxRepo(db);
+    const row = exerciseRow("row-1");
+    await db.exercises.add(row);
+    await db.outbox.add({
+      ...makeOp("op-1", "2026-10-14T00:00:00.000Z"),
+      attempts: 3,
+      quarantined: true,
+    });
+
+    await repo.discard("op-1");
+    expect(await db.outbox.get("op-1")).toBeUndefined();
+    expect(await repo.listQuarantined()).toHaveLength(0);
+    // The local row the op described is untouched.
+    expect(await db.exercises.get("row-1")).toEqual(row);
+
+    // An unknown id is a no-op, not a crash.
+    await repo.discard("op-missing");
+    db.close();
+  });
+
   it("subscribeOutboxWrites fires on outbox adds, not on other tables", async () => {
     const db = createWaveformDb(`outbox-watch-${crypto.randomUUID()}`);
     watchOutboxWrites(db);

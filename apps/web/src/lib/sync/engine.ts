@@ -49,6 +49,7 @@ export type SyncReason =
   | "visibility"
   | "poll"
   | "manual"
+  | "requeue"
   | "backoff";
 
 /** The outcome of one run after every failure kind is folded down. */
@@ -138,6 +139,12 @@ export type SyncEngine = {
   stop(): Promise<void>;
   /** Requests a run; concurrent calls share one run plus one reround. */
   requestSync(reason: SyncReason): Promise<void>;
+  /**
+   * Re-reads the outbox counts without running a sync. The outbox
+   * `creating` hook only fires on appends, so a requeue or discard (a put
+   * or delete) refreshes the chip and panel through this.
+   */
+  refreshCounts(): Promise<void>;
 };
 
 /** Folds one API failure kind into the engine's outcome vocabulary. */
@@ -558,7 +565,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     // promise clears currentRun in its finally. A caller can then wipe
     // without a run writing after it.
     const run = currentRun;
-    return run === null ? Promise.resolve() : run.then(() => undefined);
+    if (run === null) {
+      return Promise.resolve();
+    }
+    // A run stopped mid-drain returns early and skips its own final
+    // recompute, so an op the drain just parked would leave the counts
+    // stale. Recompute once the run has settled; awaiting it lets a
+    // caller that stops before a wipe read the settled counts.
+    return run.then(() => recompute());
   }
 
   return {
@@ -570,5 +584,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     start,
     stop,
     requestSync,
+    refreshCounts: recompute,
   };
 }

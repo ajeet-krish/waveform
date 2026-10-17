@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { PullPage, PushOp, PushResponse, SyncEntity } from "@waveform/api-types";
-import { watchOutboxWrites } from "../../db/outbox";
+import { watchOutboxWrites, createOutboxRepo } from "../../db/outbox";
 import { createWaveformDb, type WaveformDb } from "../../db/schema";
 import type { LocalRow, OutboxOp } from "../../db/types";
 import type { WorkoutSession as WireWorkout } from "@waveform/api-types";
@@ -828,6 +828,33 @@ describe("createSyncEngine counts", () => {
     expect(h.engine.quarantinedCount()).toBe(1);
   });
 
+  it("refreshCounts reflects a requeue or discard the write hook cannot see", async () => {
+    const h = harness();
+    await h.db.outbox.add({
+      ...op("w1", "2026-10-01T00:00:00.000Z", "op-a"),
+      attempts: 3,
+      last_error: "invalid_payload",
+      quarantined: true,
+    });
+
+    await h.engine.start();
+    expect(h.engine.quarantinedCount()).toBe(1);
+    expect(h.engine.pendingCount()).toBe(0);
+
+    const repo = createOutboxRepo(h.db);
+    // A requeue is a put, not an append, so the creating hook stays silent.
+    await repo.requeue("op-a");
+    expect(h.engine.pendingCount()).toBe(0);
+    await h.engine.refreshCounts();
+    expect(h.engine.quarantinedCount()).toBe(0);
+    expect(h.engine.pendingCount()).toBe(1);
+
+    await repo.discard("op-a");
+    await h.engine.refreshCounts();
+    expect(h.engine.pendingCount()).toBe(0);
+    expect(await h.db.outbox.count()).toBe(0);
+  });
+
   it("recomputes pending, last synced, and conflicts from local state", async () => {
     const h = harness();
     await h.db.outbox.bulkAdd([
@@ -863,5 +890,64 @@ describe("createSyncEngine counts", () => {
     expect(h.runs()).toBe(1);
     expect(h.engine.pendingCount()).toBe(0);
     expect(await h.db.outbox.count()).toBe(0);
+  });
+
+  it("refreshes counts after a stop lands mid-run once an op parks", async () => {
+    let releasePush!: () => void;
+    const pushGate = new Promise<void>((resolve) => {
+      releasePush = resolve;
+    });
+    let releasePull!: () => void;
+    const pullGate = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    let gatePull = true;
+    const h = harness({
+      push: async (ops) => {
+        await pushGate;
+        return {
+          results: ops.map((o) => ({
+            op_id: o.op_id,
+            status: "rejected" as const,
+            error: "invalid_payload" as const,
+          })),
+        };
+      },
+      pull: async (params) => {
+        if (params.entity === "exercises" && gatePull) {
+          gatePull = false;
+          await pullGate;
+        }
+        return { rows: [], next_cursor: null };
+      },
+    });
+    // Two prior failures: this run's rejection is the third, so the drain
+    // parks the op through a put the creating hook cannot see.
+    await h.db.outbox.add({
+      ...op("w1", "2026-10-01T00:00:00.000Z", "op-a"),
+      attempts: 2,
+      last_error: "invalid_payload",
+      quarantined: false,
+    });
+
+    const started = h.engine.start();
+    // Hold the push so the pre-run recompute observes the op still pending.
+    await waitFor(() => h.engine.pendingCount() === 1);
+    expect(h.engine.quarantinedCount()).toBe(0);
+
+    // Release the push: the rejection parks the op, then the run gates
+    // inside pull so a stop can land mid-run after the park.
+    releasePush();
+    await waitFor(() => h.pulledEntities().length === 1);
+
+    const stopped = h.engine.stop();
+    releasePull();
+    await stopped;
+    await started;
+
+    // stop()'s post-run recompute surfaces the op the drain just parked,
+    // instead of leaving quarantinedCount stale at its pre-run value.
+    expect(h.engine.quarantinedCount()).toBe(1);
+    expect(h.engine.pendingCount()).toBe(0);
   });
 });

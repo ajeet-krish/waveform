@@ -8,9 +8,11 @@
  *
  * Transport bookkeeping rides along: `markOutboxFailed` bumps `attempts`
  * and quarantines an op after three failures so one poisoned row cannot
- * wedge the queue. Quarantined ops stay stored (a later pass may inspect
- * or requeue them) but `listPending` and `count` skip them. A Dexie
- * `creating` hook on the outbox table publishes to `subscribeOutboxWrites`
+ * wedge the queue. Quarantined ops stay stored but `listPending` and
+ * `count` skip them; `listQuarantined` surfaces them and `requeue` puts
+ * one back in the queue with a fresh attempt count, while `discard` drops
+ * the op and leaves the local row it describes alone. A Dexie `creating`
+ * hook on the outbox table publishes to `subscribeOutboxWrites`
  * subscribers so the sync engine can debounce a drain without editing
  * every repo.
  */
@@ -50,6 +52,22 @@ export function buildOutboxOp<E extends OutboxEntity>(
 export type OutboxRepo = {
   /** Queued ops in drain order (`created_at`, then `op_id`), capped by `limit`. Quarantined ops are excluded. */
   listPending(limit?: number): Promise<OutboxOp[]>;
+  /** Parked ops in drain order (`created_at`, then `op_id`). */
+  listQuarantined(): Promise<OutboxOp[]>;
+  /**
+   * Returns one parked op to the queue: `attempts` resets to 0 and
+   * `quarantined` and `last_error` clear. It re-quarantines only after
+   * three fresh rejections. A missing op id is a no-op.
+   */
+  requeue(op_id: string): Promise<void>;
+  /**
+   * Deletes one op from the outbox only. The local row it describes
+   * stays, so this op never reaches the server and the device keeps its
+   * copy. A later queued op for the same row still carries the full row
+   * payload, so a subsequent change can still sync. A missing op id is a
+   * no-op.
+   */
+  discard(op_id: string): Promise<void>;
   /** Drops ops the server acknowledged. Unknown ids are ignored. */
   removeAcked(op_ids: string[]): Promise<void>;
   /** Number of queued ops, excluding quarantined ones. */
@@ -132,22 +150,51 @@ export function subscribeOutboxWrites(listener: OutboxWriteListener): () => void
   };
 }
 
+/** Drain order: `created_at`, then `op_id` as the tie-break. */
+function byDrainOrder(a: OutboxOp, b: OutboxOp): number {
+  if (a.created_at !== b.created_at) {
+    return a.created_at < b.created_at ? -1 : 1;
+  }
+  if (a.op_id === b.op_id) {
+    return 0;
+  }
+  return a.op_id < b.op_id ? -1 : 1;
+}
+
 export function createOutboxRepo(db: WaveformDb): OutboxRepo {
   watchOutboxWrites(db);
   return {
     async listPending(limit?: number): Promise<OutboxOp[]> {
       const all = await db.outbox.orderBy("created_at").toArray();
       const ops = all.filter((op) => op.quarantined !== true);
-      ops.sort((a, b) => {
-        if (a.created_at !== b.created_at) {
-          return a.created_at < b.created_at ? -1 : 1;
-        }
-        if (a.op_id === b.op_id) {
-          return 0;
-        }
-        return a.op_id < b.op_id ? -1 : 1;
-      });
+      ops.sort(byDrainOrder);
       return limit === undefined ? ops : ops.slice(0, limit);
+    },
+
+    async listQuarantined(): Promise<OutboxOp[]> {
+      const all = await db.outbox.orderBy("created_at").toArray();
+      const ops = all.filter((op) => op.quarantined === true);
+      ops.sort(byDrainOrder);
+      return ops;
+    },
+
+    async requeue(op_id: string): Promise<void> {
+      await db.transaction("rw", db.outbox, async () => {
+        const op = await db.outbox.get(op_id);
+        if (op === undefined) {
+          return;
+        }
+        await db.outbox.put({
+          ...op,
+          attempts: 0,
+          last_error: null,
+          quarantined: false,
+        });
+      });
+    },
+
+    async discard(op_id: string): Promise<void> {
+      await db.outbox.delete(op_id);
     },
 
     async removeAcked(op_ids: string[]): Promise<void> {

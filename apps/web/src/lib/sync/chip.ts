@@ -27,6 +27,8 @@ export type SyncChipInput = {
   adoptionNeeded: boolean | null;
   status: SyncStatus;
   pending: number;
+  /** Ops parked after repeated failures; they will not retry on their own. */
+  quarantinedCount: number;
 };
 
 export function syncChip(input: SyncChipInput): SyncChip {
@@ -51,6 +53,12 @@ export function syncChip(input: SyncChipInput): SyncChip {
     case "idle":
     default:
       break;
+  }
+  // Parked work outranks queued work: it needs a manual retry, so the chip
+  // must not read "synced" (or only "pending") while the Account panel
+  // warns that these changes will never retry on their own.
+  if (input.quarantinedCount > 0) {
+    return { label: `${input.quarantinedCount} paused`, tone: "load" };
   }
   if (input.pending > 0) {
     return { label: `pending ${input.pending}`, tone: "idle" };

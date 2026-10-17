@@ -3,6 +3,7 @@ import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PageHeader from "../components/PageHeader";
 import Panel from "../components/Panel";
+import QuarantineList from "../components/sync/QuarantineList";
 import { db } from "../db";
 import { useAppData, type AdoptionChoice } from "../lib/appData";
 import { exportBackupNow } from "../lib/backup";
@@ -36,7 +37,7 @@ const FOREIGN_BODY =
   "Every workout, activity, body stat, and exercise stored on this device is deleted, queued changes are dropped, and your account's rows download fresh. In-progress workout drafts are kept. This cannot be undone here. Export a backup first if you may need this log.";
 
 /** The state sentence under the readout; alert states announce themselves. */
-function statusSentence(status: SyncStatus, pending: number): string {
+function statusSentence(status: SyncStatus, pending: number, quarantined: number): string {
   switch (status) {
     case "syncing":
       return "Syncing with the server now.";
@@ -50,9 +51,15 @@ function statusSentence(status: SyncStatus, pending: number): string {
       return "Sync could not reach the server. It retries with a growing delay.";
     case "idle":
     default:
-      return pending > 0
-        ? "Changes are queued and push on the next sync."
-        : "Up to date: every change is on the server.";
+      if (pending > 0) {
+        return "Changes are queued and push on the next sync.";
+      }
+      // Parked ops will not retry on their own, so an idle engine must not
+      // claim every change is on the server while they sit in the list.
+      if (quarantined > 0) {
+        return "Some changes are paused and need your attention.";
+      }
+      return "Up to date: every change is on the server.";
   }
 }
 
@@ -552,6 +559,7 @@ function SyncPanel(): JSX.Element {
     adoptionNeeded: app.adoptionNeeded(),
     status: view().status(),
     pending: view().pendingCount(),
+    quarantinedCount: view().quarantinedCount(),
   });
 
   return (
@@ -572,12 +580,12 @@ function SyncPanel(): JSX.Element {
           when={statusAlerts(view().status())}
           fallback={
             <p class="form-status" role="status">
-              {statusSentence(view().status(), view().pendingCount())}
+              {statusSentence(view().status(), view().pendingCount(), view().quarantinedCount())}
             </p>
           }
         >
           <p class="form-status" role="alert">
-            {statusSentence(view().status(), view().pendingCount())}
+            {statusSentence(view().status(), view().pendingCount(), view().quarantinedCount())}
           </p>
         </Show>
         <dl class="def-list mt-4">
@@ -607,6 +615,7 @@ function SyncPanel(): JSX.Element {
               : `${view().quarantinedCount()} changes are paused after repeated failures and will not retry on their own.`}
           </p>
         </Show>
+        <QuarantineList />
         <div class="form-actions mt-4">
           <button
             type="button"

@@ -888,6 +888,36 @@ a.discipline:hover {
   color: var(--load);
 }
 
+/* Account: the parked-op list behind the "Paused changes" disclosure. */
+
+.quarantine-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quarantine-row {
+  padding: var(--space-3);
+  background: var(--console);
+  border: 1px solid var(--etch);
+  border-radius: var(--radius);
+}
+
+.quarantine-summary {
+  color: var(--paper);
+  font-size: var(--text-sm);
+}
+
+.quarantine-reason {
+  margin-top: var(--space-1);
+  color: var(--paper-dim);
+  font-size: var(--text-sm);
+}
+
+.quarantine-meta {
+  margin-top: var(--space-2);
+}
+
 @media (min-width: 720px) {
   .panel-grid,
   .discipline-grid {

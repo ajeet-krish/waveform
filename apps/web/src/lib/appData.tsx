@@ -37,7 +37,7 @@ import type { LocalProfile } from "../db/types";
 import { createApiClient, resolveApiBaseUrl, type ApiClient } from "./api";
 import { createAuthStore, readSession, type AuthStore } from "./session";
 import { adoptLocalUser, adoptStartEmpty, needsAdoption } from "./sync/adoption";
-import { createSyncEngine, type SyncStatus } from "./sync/engine";
+import { createSyncEngine, type SyncReason, type SyncStatus } from "./sync/engine";
 import { API_BASE_URL_KEY, getMeta, setMeta } from "./sync/meta";
 import {
   classifyOwnership,
@@ -99,8 +99,10 @@ export type SyncView = {
   quarantinedCount: Accessor<number>;
   lastSyncedAt: Accessor<string | null>;
   conflicts: Accessor<number>;
-  /** Asks for one run now (the "Sync now" button). */
-  syncNow(): void;
+  /** Asks for one run now (the "Sync now" button); "manual" by default. */
+  syncNow(reason?: SyncReason): void;
+  /** Re-reads the outbox counts after a requeue or discard. */
+  refreshCounts(): Promise<void>;
 };
 
 export type AppData = {
@@ -572,9 +574,10 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     quarantinedCount: engine.quarantinedCount,
     lastSyncedAt: engine.lastSyncedAt,
     conflicts: engine.conflicts,
-    syncNow: () => {
-      void engine.requestSync("manual");
+    syncNow: (reason = "manual") => {
+      void engine.requestSync(reason);
     },
+    refreshCounts: () => engine.refreshCounts(),
   };
 
   const storageView: StorageView = {

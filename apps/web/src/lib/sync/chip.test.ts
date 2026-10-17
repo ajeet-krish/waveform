@@ -7,6 +7,7 @@ function input(overrides: Partial<SyncChipInput> = {}): SyncChipInput {
     adoptionNeeded: false,
     status: "idle",
     pending: 0,
+    quarantinedCount: 0,
     ...overrides,
   };
 }
@@ -38,6 +39,19 @@ describe("syncChip", () => {
   it("counts queued work before claiming synced", () => {
     expect(syncChip(input({ pending: 3 }))).toEqual({ label: "pending 3", tone: "idle" });
     expect(syncChip(input({ pending: 1, status: "offline" })).label).toBe("offline");
+  });
+
+  it("surfaces parked work on the load tone instead of claiming synced", () => {
+    expect(syncChip(input({ quarantinedCount: 3 }))).toEqual({ label: "3 paused", tone: "load" });
+    // Parked work outranks a queued count and the synced fallback: it will
+    // not retry on its own, so the chip must not read "pending" or "synced".
+    expect(syncChip(input({ quarantinedCount: 1, pending: 2 }))).toEqual({
+      label: "1 paused",
+      tone: "load",
+    });
+    // An active or stopped engine state still speaks first.
+    expect(syncChip(input({ quarantinedCount: 3, status: "syncing" })).label).toBe("syncing");
+    expect(syncChip(input({ quarantinedCount: 3, status: "offline" })).label).toBe("offline");
   });
 
   it("claims synced only when caught up and signed in", () => {

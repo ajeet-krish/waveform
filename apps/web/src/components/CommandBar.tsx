@@ -15,6 +15,7 @@ export default function CommandBar() {
       adoptionNeeded: app.adoptionNeeded(),
       status: app.sync().status(),
       pending: app.sync().pendingCount(),
+      quarantinedCount: app.sync().quarantinedCount(),
     });
   return (
     <header class="cmd">
