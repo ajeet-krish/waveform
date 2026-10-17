@@ -11,6 +11,7 @@ import { createWaveformDb, type WaveformDb } from "../../db/schema";
 import type { ClimbSends, LocalProfile, LocalRow, OutboxOp, WorkoutDraft } from "../../db/types";
 import { ADOPTED_USER_ID_KEY, PULL_CURSOR_PREFIX, getMeta, setMeta } from "./meta";
 import { adoptLocalUser, adoptStartEmpty, needsAdoption } from "./adoption";
+import { ForeignOwnerError } from "./ownership";
 
 const OLD_ID = "device-local-1";
 const NEW_ID = "server-user-9";
@@ -266,6 +267,32 @@ describe("adoptLocalUser", () => {
     });
     expect(await db.local_profile.count()).toBe(1);
     expect((await db.workout_sessions.get("session-1"))?.user_id).toBe(NEW_ID);
+  });
+
+  it("refuses to adopt a foreign device and modifies nothing", async () => {
+    const db = harness("foreign");
+    await seed(db);
+    // The device is already claimed by its own local owner, so a sign-in as
+    // a different account finds a log that is not theirs.
+    await setMeta(db, ADOPTED_USER_ID_KEY, OLD_ID);
+    const before = {
+      session: await db.workout_sessions.get("session-1"),
+      exercise: await db.exercises.get("custom-1"),
+      profile: await db.local_profile.get(OLD_ID),
+      ops: await db.outbox.count(),
+      adopted: await getMeta(db, ADOPTED_USER_ID_KEY),
+    };
+
+    await expect(adoptLocalUser(db, NEW_ID)).rejects.toBeInstanceOf(ForeignOwnerError);
+
+    // Every row, the profile, the outbox, and the marker are untouched.
+    expect(await db.workout_sessions.get("session-1")).toEqual(before.session);
+    expect((await db.workout_sessions.get("session-1"))?.user_id).toBe(OLD_ID);
+    expect(await db.exercises.get("custom-1")).toEqual(before.exercise);
+    expect(await db.local_profile.get(OLD_ID)).toEqual(before.profile);
+    expect(await db.local_profile.count()).toBe(1);
+    expect(await db.outbox.count()).toBe(before.ops);
+    expect(await getMeta(db, ADOPTED_USER_ID_KEY)).toBe(OLD_ID);
   });
 });
 

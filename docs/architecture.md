@@ -275,7 +275,15 @@ exposes `status` ("idle" | "syncing" | "offline" | "waking" | "auth-expired" | "
 `pendingCount`, `quarantinedCount`, `lastSyncedAt`, `conflicts`, and
 `start()` / `stop()` / `requestSync(reason)`. One run is `compactOutbox` (once, behind its
 one-time flag), then `drainOutbox` to empty in `RULE_CONSTANTS.sync.maxOpsPerPush` batches,
-then `pullAll` across every entity cursor. `requestSync` is single flight: concurrent
+then `pullAll` across every entity cursor. Pull resumes each entity from its stored
+cursor, behind a periodic full re-pull safety net (`dueForFullRepull`, 12 hours): a due
+run sets `full_pull_pending` and walks all entities from the beginning without deleting
+the stored cursors, so an interrupted attempt degrades to an incremental resume on the
+next run instead of re-downloading everything; a complete run stamps `last_full_pull_at`
+and clears the flag. The cursor is an optimization and the residual window inside a run is
+one apply transaction. `stop()` detaches every trigger and resolves once any in-flight run
+has settled, and the run itself is signalled to stop between a pull page and a drain
+batch. `requestSync` is single flight: concurrent
 triggers join the in-flight promise and queue exactly one follow-up round, run under the
 newest trigger's reason, so a burst collapses instead of stampeding the free-tier API.
 Triggers are bootstrap (`start()` while signed in), a 2 s debounce on
@@ -295,25 +303,47 @@ localhost default; `.github/workflows/pages.yml` bakes the deployed API address 
 Pages build), the API client rebuilt whenever the address or token changes, and the engine
 bound to `auth.state() === "signed-in"`. `evaluateAuth` gates every transition: signed out
 stops the engine; signed in it waits out bootstrap (so the address override is settled
-first), reads `needsAdoption`, and only an adopted device rebinds the repos to the server
-user id (`createRepos(db, { userId })` wrapped in `guardRepos`) and starts a sync. Until
-then the Phase 1 contract holds: writes queue locally and the chip reads "local only". The
-account action surface is `account: { signup, login, logout, adoptionChoice, setApiBaseUrl }`
-next to `auth`, `adoptionNeeded`, `apiBaseUrlOverride`, `apiBaseUrl`, and `sync()`.
+first), then runs `needsAdoption` and `classifyOwnership`. A foreign device (another
+account's log) or a failed ownership read (an "unknown" device state, which fails closed
+rather than assuming "mine") binds no repos and starts no engine; otherwise an adopted
+device rebinds the repos to the server user id (`createRepos(db, { userId })` wrapped in
+`guardRepos`) and starts a sync, while an unadopted one waits for the data choice. Until
+then the Phase 1 contract holds: writes queue locally and the chip reads "local only".
+Sign-out awaits the engine stop, calls the server best-effort, wipes this account's local
+copy (`wipeAccountDataFromDevice`, see below), and flips state to signed out. The account
+action surface is `account: { signup, login, logout, adoptionChoice, setApiBaseUrl }` next
+to `auth`, `adoptionNeeded`, `deviceOwnership`, `apiBaseUrlOverride`, `apiBaseUrl`, and
+`sync()`.
 
 `routes/Account.tsx` (registered at `/account`; `/login` now redirects there) carries the
 sign-up and sign-in forms, the signed-in session with sign out, the first-sign-in data
 choice ("Upload my existing local data" as the primary action, "Start empty" behind a
 ConfirmDialog demanding the typed phrase "empty", after which the catalog is re-seeded),
 the sync readout (state lamp, queued, paused, last synced, conflicts, Sync now), and the
-Advanced section that sets or clears the API address override. `components/CommandBar.tsx`
+Advanced section that sets or clears the API address override. A device that holds another
+account's log shows a foreign panel instead of the session and adoption flow, offering
+export, a typed "remove" confirmation, and sign out; the upload action never renders there.
+Sign out itself is behind a confirmation because it always removes this account's local
+copy from the device. `lib/sync/ownership.ts` owns the classification and the
+one-transaction wipe (`OWNERSHIP_SOURCES`, `classifyOwnership`,
+`wipeAccountDataFromDevice`): the account's rows always go, while device-local scratch
+(the adoption marker, cursors, conflict log, drafts, and the sync stamps) is cleared only
+when the device actually belongs to that account, so a foreign panel's sign-out leaves the
+foreign log classifiable. `adoptLocalUser` refuses a foreign device with
+`ForeignOwnerError` before modifying a row. `components/CommandBar.tsx`
 turns the status chip into a link to `/account`; its label and lamp tone come from the pure
 `lib/sync/chip.ts::syncChip` ("sign in", "local only", "syncing", "offline", "sync error",
 "pending N", "synced"), which the Account readout restates so bar and panel always agree.
-Coverage: `lib/sync/engine.test.ts` (16 tests: single-flight coalescing, the outbox-write
+Coverage: `lib/sync/engine.test.ts` (single-flight coalescing, the outbox-write
 debounce, online and visibility triggers, the backoff schedule on injected timers,
-offline/auth-expired/waking transitions, quarantine and conflict surfacing), plus
-`chip.test.ts` and the `formatSyncStamp` cases in `format.test.ts`.
+offline/auth-expired/waking transitions, quarantine and conflict surfacing, and a `stop()`
+that waits out an in-flight run),
+`lib/sync/pull.test.ts` (cursor resume, a due full re-pull starting from the top without
+deleting cursors, the pending-flag resume after an abort, and the complete-only
+`last_full_pull_at` stamp),
+`lib/sync/ownership.test.ts` (fresh / mine / foreign classification, the one-account
+wipe, and foreign scratch survival), `lib/sync/adoption.test.ts` (the foreign-device
+refusal), plus `chip.test.ts` and the `formatSyncStamp` cases in `format.test.ts`.
 
 ## Phase Plan
 

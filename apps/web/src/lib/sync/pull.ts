@@ -10,6 +10,21 @@
  * the tail page leaves the cursor unchanged (re-pulling the tail is
  * idempotent: a tie keeps the local row).
  *
+ * The cursor is an optimization behind a full re-pull safety net: a row
+ * whose `applied_at` is at or before a stored cursor is never revisited,
+ * so a deleted-then-reminted cursor or a server-side clock step could in
+ * principle hide a row. `dueForFullRepull` bounds that: once
+ * FULL_REPULL_INTERVAL_MS has passed since the last completed full
+ * re-pull, the next run walks all entities from the beginning. The walk
+ * is resumable instead of storming: a due run sets `full_pull_pending`
+ * and starts each entity from a null cursor WITHOUT deleting the stored
+ * cursors (they are still written per page as usual), so an interrupted
+ * attempt leaves the flag set and the next run degrades to a normal
+ * incremental resume from those cursors. A complete run stamps
+ * `last_full_pull_at` and clears the flag, whichever run finishes the
+ * pending walk. The residual window within a run is one apply
+ * transaction, since merges and their cursor move together.
+ *
  * mergePullRow is pure LWW on `updated_at` parsed as instants: a
  * strictly newer incoming row wins, a tie keeps the local row. The
  * winner's payload is written with a plain put, never an outbox op:
@@ -32,7 +47,16 @@ import type {
   WorkoutSession,
 } from "@waveform/api-types";
 import { ApiError } from "../api";
-import { CONFLICT_LOG_KEY, LAST_SYNCED_AT_KEY, getMeta, pullCursorKey, setMeta } from "./meta";
+import {
+  CONFLICT_LOG_KEY,
+  FULL_PULL_PENDING_KEY,
+  LAST_FULL_PULL_AT_KEY,
+  LAST_SYNCED_AT_KEY,
+  getLastFullPullAt,
+  getMeta,
+  pullCursorKey,
+  setMeta,
+} from "./meta";
 
 /**
  * The pull entity order, parents first: an exercise before the sessions
@@ -50,6 +74,33 @@ export const CLIENT_PULL_ORDER: readonly OutboxEntity[] = [
 
 /** How many conflict entries the log keeps (newest win). */
 export const CONFLICT_LOG_CAP = 200;
+
+/** How stale the last full re-pull may get before the next pull forces one. */
+export const FULL_REPULL_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * True when a full re-pull is due: never run before, an unparseable
+ * stamp, a stamp in the future (a backward clock step must not suppress
+ * the safety net), or the last completed run is at least `intervalMs`
+ * old. Pure so the schedule is testable without a database.
+ */
+export function dueForFullRepull(
+  lastFullPullAt: string | null,
+  now: Date,
+  intervalMs: number = FULL_REPULL_INTERVAL_MS,
+): boolean {
+  if (lastFullPullAt === null) {
+    return true;
+  }
+  const last = Date.parse(lastFullPullAt);
+  if (Number.isNaN(last)) {
+    return true;
+  }
+  if (last > now.getTime()) {
+    return true;
+  }
+  return now.getTime() - last >= intervalMs;
+}
 
 /** One dropped-conflict record kept in sync_meta for observability. */
 export type PullConflictEntry = {
@@ -81,6 +132,12 @@ export type PullAllParams = {
   api: SyncPullApi;
   /** Clock for last_synced_at and conflict entries; defaults to now. */
   now?: Date;
+  /**
+   * Consulted at the top of every page iteration; a true answer returns
+   * the partial result with `complete: false`, leaving already-merged
+   * rows and their cursors in place (settled work stands).
+   */
+  shouldStop?: () => boolean;
 };
 
 export type PullAllResult = {
@@ -276,20 +333,42 @@ async function readCursor(db: WaveformDb, entity: OutboxEntity): Promise<string 
  * Pulls every entity to the tip. Each entity resumes from its cursor
  * and pages until `next_cursor` is null; every page's merges and its
  * `next_cursor` persist land in ONE transaction, and the tail page
- * leaves the cursor unchanged. When all six entities reach the tip,
- * `last_synced_at` is stamped. An ApiError mid-run (offline, timeout,
- * auth-expired, 4xx/5xx) stops the run with complete false; work already
- * merged and cursors already persisted stand, so the next pull resumes
- * where this one broke. Non-ApiError failures are bugs and rethrow.
+ * leaves the cursor unchanged. A due full re-pull (`dueForFullRepull`)
+ * that is not already pending sets `full_pull_pending` and starts every
+ * entity from a null cursor WITHOUT deleting the stored cursors; a run
+ * that finds the flag already set resumes incrementally from them. When
+ * all six entities reach the tip, `last_synced_at` is stamped and, when
+ * the run was (or finished) a full re-pull, `last_full_pull_at` is
+ * stamped and `full_pull_pending` is cleared. An ApiError mid-run
+ * (offline, timeout, auth-expired, 4xx/5xx) stops the run with complete
+ * false; work already merged and cursors already persisted stand, so the
+ * next pull resumes where this one broke. A due run that aborts leaves
+ * the flag set and the stamp unset, so the next run degrades to an
+ * incremental resume and eventually completes. A `shouldStop` answer
+ * stops the run between pages the same way. Non-ApiError failures are
+ * bugs and rethrow.
  */
 export async function pullAll(params: PullAllParams): Promise<PullAllResult> {
-  const { db, api } = params;
+  const { db, api, shouldStop } = params;
   const now = params.now ?? new Date();
   const totals: PullAllResult = { merged: 0, conflicts: 0, complete: false };
 
+  const fullRepullDue = dueForFullRepull(await getLastFullPullAt(db), now);
+  const fullPullPending = (await getMeta(db, FULL_PULL_PENDING_KEY)) === true;
+  // Only a due run that is not already mid-walk starts from the top; a
+  // pending run resumes incrementally so an interrupted attempt makes
+  // progress instead of re-downloading everything.
+  const startingFull = fullRepullDue && !fullPullPending;
+  if (startingFull) {
+    await setMeta(db, FULL_PULL_PENDING_KEY, true);
+  }
+
   for (const entity of CLIENT_PULL_ORDER) {
-    let cursor = await readCursor(db, entity);
+    let cursor = startingFull ? null : await readCursor(db, entity);
     for (;;) {
+      if (shouldStop?.() === true) {
+        return totals;
+      }
       let page: PullPage;
       try {
         page = await api.pull({ entity, cursor });
@@ -338,6 +417,12 @@ export async function pullAll(params: PullAllParams): Promise<PullAllResult> {
   }
 
   await setMeta(db, LAST_SYNCED_AT_KEY, now.toISOString());
+  if (startingFull || fullPullPending) {
+    // This run either walked the whole log from the top or finished the
+    // pending walk; either way the safety net is satisfied.
+    await setMeta(db, LAST_FULL_PULL_AT_KEY, now.toISOString());
+    await db.sync_meta.delete(FULL_PULL_PENDING_KEY);
+  }
   totals.complete = true;
   return totals;
 }

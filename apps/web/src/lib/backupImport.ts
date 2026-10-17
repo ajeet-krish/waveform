@@ -24,6 +24,14 @@
  * carries no catalog rows and reconciles stale global catalog rows back
  * to the current seed (a hard delete writes no ops, so the queue is
  * untouched).
+ *
+ * A backup carries the identity of the account that made it, which may
+ * not be this device's account. Every imported owner-bearing row is
+ * re-stamped to the LOCAL profile id (custom exercises' owner_id, and
+ * user_id on sessions, activities, and body_stats), and an existing
+ * local_profile id is never replaced by a foreign one from the file: the
+ * restored log belongs to the account on this device. Global catalog
+ * exercises keep owner_id null.
  */
 
 import { e1rmBrzycki } from "@waveform/scoring";
@@ -525,6 +533,35 @@ async function mergeClimbSends(db: WaveformDb, incoming: ClimbSends[]): Promise<
   return written;
 }
 
+/**
+ * Re-stamps an imported custom exercise's owner onto the local profile
+ * id so a restored backup belongs to the account on THIS device, never
+ * the identity baked into the file. Catalog rows (owner_id null) stay
+ * global, and a null owner id leaves every row untouched (there is
+ * nothing to re-stamp it to).
+ */
+function restampExercise(row: LocalRow<Exercise>, ownerId: string | null): LocalRow<Exercise> {
+  if (ownerId === null || row.owner_id === null) {
+    return row;
+  }
+  return { ...row, owner_id: ownerId };
+}
+
+function restampSession(
+  row: LocalRow<WorkoutSession>,
+  ownerId: string | null,
+): LocalRow<WorkoutSession> {
+  return ownerId === null ? row : { ...row, user_id: ownerId };
+}
+
+function restampActivity(row: LocalRow<Activity>, ownerId: string | null): LocalRow<Activity> {
+  return ownerId === null ? row : { ...row, user_id: ownerId };
+}
+
+function restampBodyStat(row: LocalRow<BodyStats>, ownerId: string | null): LocalRow<BodyStats> {
+  return ownerId === null ? row : { ...row, user_id: ownerId };
+}
+
 async function runMerge(
   db: WaveformDb,
   backup: WaveformBackupV2,
@@ -546,11 +583,21 @@ async function runMerge(
     async () => {
       const stores = emptyCounts();
       const ops: OutboxOp[] = [];
-      stores.exercises = await mergeById(db.exercises, "exercises", backup.exercises, now, ops);
+      // The local identity wins; only a device with no profile adopts the
+      // backup's own id. Every owner-bearing row is re-stamped to it.
+      const existing = (await db.local_profile.toCollection().first()) ?? null;
+      const ownerId = existing?.id ?? backup.profile?.id ?? null;
+      stores.exercises = await mergeById(
+        db.exercises,
+        "exercises",
+        backup.exercises.map((row) => restampExercise(row, ownerId)),
+        now,
+        ops,
+      );
       stores.workout_sessions = await mergeById(
         db.workout_sessions,
         "workout_sessions",
-        backup.workout_sessions,
+        backup.workout_sessions.map((row) => restampSession(row, ownerId)),
         now,
         ops,
       );
@@ -562,12 +609,24 @@ async function runMerge(
         ops,
       );
       stores.set_entries = await mergeSets(db, backup.set_entries, now, ops);
-      stores.activities = await mergeById(db.activities, "activities", backup.activities, now, ops);
-      stores.body_stats = await mergeById(db.body_stats, "body_stats", backup.body_stats, now, ops);
+      stores.activities = await mergeById(
+        db.activities,
+        "activities",
+        backup.activities.map((row) => restampActivity(row, ownerId)),
+        now,
+        ops,
+      );
+      stores.body_stats = await mergeById(
+        db.body_stats,
+        "body_stats",
+        backup.body_stats.map((row) => restampBodyStat(row, ownerId)),
+        now,
+        ops,
+      );
       stores.climb_sends = await mergeClimbSends(db, backup.climb_sends);
       await db.outbox.bulkAdd(ops);
       let profileRestored = false;
-      if (backup.profile !== null && (await db.local_profile.count()) === 0) {
+      if (existing === null && backup.profile !== null) {
         await db.local_profile.put(backup.profile);
         profileRestored = true;
       }
@@ -597,8 +656,11 @@ async function runReplace(
     ],
     async () => {
       // Capture the local profile before the wipe so a backup without
-      // one keeps the device's own account row.
+      // one keeps the device's own account row, and so the local id can
+      // re-stamp every imported row (a foreign backup must not carry its
+      // own identity onto this device).
       const keepProfile = (await db.local_profile.toCollection().first()) ?? null;
+      const ownerId = keepProfile?.id ?? backup.profile?.id ?? null;
       await db.exercises.clear();
       await db.workout_sessions.clear();
       await db.exercise_entries.clear();
@@ -611,14 +673,16 @@ async function runReplace(
       await db.sync_meta.clear();
 
       const ops: OutboxOp[] = [];
-      for (const row of backup.exercises) {
+      for (const raw of backup.exercises) {
+        const row = restampExercise(raw, ownerId);
         await db.exercises.put(row);
         // Catalog rows are server-owned: restore them locally, queue no op.
         if (!isServerOwnedRow("exercises", row)) {
           ops.push(buildOutboxOp("exercises", restoreAction(row), row, now, row.updated_at));
         }
       }
-      for (const row of backup.workout_sessions) {
+      for (const raw of backup.workout_sessions) {
+        const row = restampSession(raw, ownerId);
         await db.workout_sessions.put(row);
         ops.push(buildOutboxOp("workout_sessions", restoreAction(row), row, now, row.updated_at));
       }
@@ -631,11 +695,13 @@ async function runReplace(
         await db.set_entries.put(row);
         ops.push(buildOutboxOp("set_entries", restoreAction(row), toSetWrite(row), now, row.updated_at));
       }
-      for (const row of backup.activities) {
+      for (const raw of backup.activities) {
+        const row = restampActivity(raw, ownerId);
         await db.activities.put(row);
         ops.push(buildOutboxOp("activities", restoreAction(row), row, now, row.updated_at));
       }
-      for (const row of backup.body_stats) {
+      for (const raw of backup.body_stats) {
+        const row = restampBodyStat(raw, ownerId);
         await db.body_stats.put(row);
         ops.push(buildOutboxOp("body_stats", restoreAction(row), row, now, row.updated_at));
       }
@@ -644,11 +710,17 @@ async function runReplace(
       }
       await db.outbox.bulkAdd(ops);
 
-      const restored = backup.profile ?? keepProfile;
+      // The local identity is never replaced by the file's: an existing
+      // profile keeps its id (the backup's display fields may fill in),
+      // and only a device with no profile adopts the backup profile whole.
       let profileRestored = false;
-      if (restored !== null) {
-        await db.local_profile.put(restored);
+      if (keepProfile !== null) {
+        const restored = backup.profile ?? keepProfile;
+        await db.local_profile.put({ ...restored, id: keepProfile.id });
         profileRestored = backup.profile !== null;
+      } else if (backup.profile !== null) {
+        await db.local_profile.put(backup.profile);
+        profileRestored = true;
       }
 
       const stores: ImportStoreCounts = {

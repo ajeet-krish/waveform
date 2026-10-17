@@ -3,7 +3,9 @@ import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PageHeader from "../components/PageHeader";
 import Panel from "../components/Panel";
+import { db } from "../db";
 import { useAppData, type AdoptionChoice } from "../lib/appData";
+import { exportBackupNow } from "../lib/backup";
 import { errorMessage } from "../lib/errors";
 import { formatSyncStamp } from "../lib/format";
 import { syncChip, type SyncChipInput } from "../lib/sync/chip";
@@ -13,14 +15,25 @@ const MIN_PASSWORD = RULE_CONSTANTS.password.minPasswordLength;
 
 const SIGNUP_FAILURE = "The account could not be created. Check the fields and try again.";
 const LOGIN_FAILURE = "Sign-in failed. Check your email and password.";
-const SIGNOUT_FAILURE = "The server could not be reached, but you are signed out on this device.";
+const SIGNOUT_FAILURE =
+  "The local copy could not be removed, so you are still signed in on this device. Try again.";
 const ADOPTION_FAILURE = "The data choice could not be applied. Try again.";
 const ADDRESS_FAILURE = "The API address could not be saved.";
+const EXPORT_FAILURE = "The backup could not be created. Try again.";
 
 const EMPTY_PHRASE = "empty";
 const EMPTY_TITLE = "Start empty on this device?";
 const EMPTY_BODY =
   "Every workout, activity, body stat, and exercise stored on this device is deleted, queued changes are dropped, and your account's rows download fresh. In-progress workout drafts are kept. This cannot be undone here.";
+
+const SIGNOUT_TITLE = "Sign out and remove this device's copy?";
+const SIGNOUT_BODY =
+  "Signing out removes this account's synced rows from this device: workouts, activities, body stats, custom exercises, queued changes, and in-progress drafts. Your copy on the server is safe and downloads again when you sign back in.";
+
+const FOREIGN_PHRASE = "remove";
+const FOREIGN_TITLE = "Remove this log and start fresh?";
+const FOREIGN_BODY =
+  "Every workout, activity, body stat, and exercise stored on this device is deleted, queued changes are dropped, and your account's rows download fresh. In-progress workout drafts are kept. This cannot be undone here. Export a backup first if you may need this log.";
 
 /** The state sentence under the readout; alert states announce themselves. */
 function statusSentence(status: SyncStatus, pending: number): string {
@@ -52,6 +65,8 @@ function statusAlerts(status: SyncStatus): boolean {
  * choice about its pre-account data, the sync readout, and where sync
  * points. Signed out it is two forms and the address override; signed in
  * it is the session, the data choice when owed, and the sync telemetry.
+ * A device that holds another account's log gets its own panel instead of
+ * the session and adoption flow.
  */
 export default function Account(): JSX.Element {
   const app = useAppData();
@@ -61,7 +76,7 @@ export default function Account(): JSX.Element {
       <PageHeader
         path="Account / Sync"
         title="Account"
-        lede="One account carries your log between devices. This device always keeps its own copy first; syncing is what lets the same rows show up on your other screen."
+        lede="One account carries your log between devices. This device keeps its own copy first, and signing out removes that account's copy, so a shared or handed-down device never mixes two logs."
       />
       <div class="panel-grid">
         <Show
@@ -73,8 +88,10 @@ export default function Account(): JSX.Element {
             </>
           }
         >
-          <SessionPanel />
-          <Show when={app.adoptionNeeded() === true}>
+          <Show when={app.deviceOwnership()?.kind === "foreign"} fallback={<SessionPanel />}>
+            <ForeignOwnerPanel />
+          </Show>
+          <Show when={app.adoptionNeeded() === true && app.deviceOwnership()?.kind !== "foreign"}>
             <AdoptionPanel />
           </Show>
           <Show when={app.adoptionNeeded() !== true}>
@@ -85,7 +102,8 @@ export default function Account(): JSX.Element {
       </div>
       <p class="panel-note mt-4">
         While you are signed in, sync runs on its own: queued edits push first, then every newer
-        row on the server pulls down. Weights are stored in kg and lengths in cm.
+        row on the server pulls down. Signing out removes this account's local copy from this
+        device. Weights are stored in kg and lengths in cm.
       </p>
     </div>
   );
@@ -270,21 +288,6 @@ function SignUpPanel(): JSX.Element {
 /** The signed-in account, with the one action that ends the session. */
 function SessionPanel(): JSX.Element {
   const app = useAppData();
-  const [busy, setBusy] = createSignal(false);
-  const [failure, setFailure] = createSignal<string | null>(null);
-
-  const signOut = async (): Promise<void> => {
-    setBusy(true);
-    setFailure(null);
-    try {
-      await app.account.logout();
-    } catch (cause) {
-      setFailure(errorMessage(cause, SIGNOUT_FAILURE));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <Panel label="Account" meta="signed in">
       <dl class="def-list">
@@ -297,8 +300,43 @@ function SessionPanel(): JSX.Element {
           <dd class="def-value">{app.auth.user()?.email ?? ""}</dd>
         </div>
       </dl>
+      <SignOutAction />
+    </Panel>
+  );
+}
+
+/**
+ * The one sign-out control, shared by the session and foreign-log panels.
+ * A confirmation comes first because signing out now removes this
+ * account's synced copy from the device.
+ */
+function SignOutAction(): JSX.Element {
+  const app = useAppData();
+  const [busy, setBusy] = createSignal(false);
+  const [failure, setFailure] = createSignal<string | null>(null);
+  const [confirm, setConfirm] = createSignal(false);
+
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await app.account.logout();
+    } catch (cause) {
+      setFailure(errorMessage(cause, SIGNOUT_FAILURE));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
       <div class="form-actions mt-4">
-        <button type="button" class="btn btn-secondary" disabled={busy()} onClick={() => void signOut()}>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          disabled={busy()}
+          onClick={() => setConfirm(true)}
+        >
           {busy() ? "Signing out" : "Sign out"}
         </button>
       </div>
@@ -307,6 +345,109 @@ function SessionPanel(): JSX.Element {
           {failure()}
         </p>
       </Show>
+      <ConfirmDialog
+        open={confirm()}
+        title={SIGNOUT_TITLE}
+        body={SIGNOUT_BODY}
+        confirmLabel="Remove local copy and sign out"
+        onConfirm={() => {
+          setConfirm(false);
+          void run();
+        }}
+        onCancel={() => setConfirm(false)}
+      />
+    </>
+  );
+}
+
+/**
+ * The foreign-device panel: this device holds a training log that belongs
+ * to another account, so signing in here changes nothing until the user
+ * exports it, removes it, or signs out. The upload action is deliberately
+ * absent: uploading would hand this account someone else's log.
+ */
+function ForeignOwnerPanel(): JSX.Element {
+  const app = useAppData();
+  const [busy, setBusy] = createSignal<"export" | "remove" | null>(null);
+  const [note, setNote] = createSignal<string | null>(null);
+  const [failure, setFailure] = createSignal<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = createSignal(false);
+
+  const exportLog = async (): Promise<void> => {
+    setBusy("export");
+    setNote(null);
+    setFailure(null);
+    try {
+      await exportBackupNow(db);
+      setNote("Backup downloaded to this device.");
+    } catch {
+      setFailure(EXPORT_FAILURE);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    setBusy("remove");
+    setNote(null);
+    setFailure(null);
+    try {
+      await app.account.adoptionChoice("start-empty");
+    } catch (cause) {
+      setFailure(errorMessage(cause, ADOPTION_FAILURE));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Panel label="Another account's log" meta="action needed">
+      <p class="panel-note">
+        This device holds a training log belonging to another account. Signing in here does not
+        upload, overwrite, or sync that log. Export a backup if you may need it, remove it to start
+        fresh with this account, or sign out.
+      </p>
+      <div class="form-actions mt-4">
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={busy() !== null}
+          onClick={() => void exportLog()}
+        >
+          {busy() === "export" ? "Exporting" : "Export a backup of this log"}
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          disabled={busy() !== null}
+          onClick={() => setConfirmRemove(true)}
+        >
+          Remove this log and start fresh
+        </button>
+      </div>
+      <Show when={note()}>
+        <p class="form-status" role="status">
+          {note()}
+        </p>
+      </Show>
+      <Show when={failure()}>
+        <p class="form-status" role="alert">
+          {failure()}
+        </p>
+      </Show>
+      <ConfirmDialog
+        open={confirmRemove()}
+        title={FOREIGN_TITLE}
+        body={FOREIGN_BODY}
+        confirmLabel="Delete this log and start fresh"
+        confirmPhrase={FOREIGN_PHRASE}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          void remove();
+        }}
+        onCancel={() => setConfirmRemove(false)}
+      />
+      <SignOutAction />
     </Panel>
   );
 }

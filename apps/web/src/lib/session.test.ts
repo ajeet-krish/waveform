@@ -179,4 +179,49 @@ describe("createAuthStore", () => {
     expect(storage.raw()).toBeNull();
     expect(readSession(storage)).toBeNull();
   });
+
+  it("runs onBeforeSignOut before flipping state, even when the server call fails", async () => {
+    const storage = memStorage();
+    writeSession(session(), storage);
+    const api = stubAuthApi({ token: "t", expires_at: FUTURE, user: USER });
+    api.logout = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const order: string[] = [];
+    const store = createAuthStore({
+      api,
+      storage,
+      onBeforeSignOut: (userId) => {
+        // The wipe runs while the app still reads signed-in, so the
+        // account's data is removed before the state flips.
+        order.push(`${userId}:${store.state()}`);
+      },
+    });
+
+    await store.logout();
+
+    expect(order).toEqual(["user-1:signed-in"]);
+    expect(store.state()).toBe("signed-out");
+    expect(store.user()).toBeNull();
+    expect(storage.raw()).toBeNull();
+  });
+
+  it("keeps the session when onBeforeSignOut throws", async () => {
+    const storage = memStorage();
+    writeSession(session(), storage);
+    const api = stubAuthApi({ token: "t", expires_at: FUTURE, user: USER });
+    const store = createAuthStore({
+      api,
+      storage,
+      onBeforeSignOut: () => {
+        throw new Error("quota");
+      },
+    });
+
+    await expect(store.logout()).rejects.toThrow(/quota/);
+    // The failed wipe leaves the session in place so the caller can report it.
+    expect(store.state()).toBe("signed-in");
+    expect(store.user()?.id).toBe("user-1");
+    expect(storage.raw()).not.toBeNull();
+  });
 });

@@ -135,6 +135,36 @@ describe("drainOutbox", () => {
     expect(await db.outbox.count()).toBe(0);
   });
 
+  it("stops between batches on shouldStop, keeping settled work", async () => {
+    const db = harness("stop");
+    await db.outbox.bulkAdd([
+      op("w1", "2026-10-01T00:00:00.000Z", "op-1"),
+      op("w2", "2026-10-02T00:00:00.000Z", "op-2"),
+      op("w3", "2026-10-03T00:00:00.000Z", "op-3"),
+      op("w4", "2026-10-04T00:00:00.000Z", "op-4"),
+    ]);
+    const calls: PushOp[][] = [];
+    let stop = false;
+    const api: SyncPushApi = {
+      async push(batch) {
+        calls.push(batch);
+        // The first batch settles, then a stop lands before the next one.
+        stop = true;
+        return { results: allApplied(batch) };
+      },
+    };
+
+    const result = await drainOutbox({ db, api, cap: 2, shouldStop: () => stop });
+
+    // A partial result with no abort reason: the first batch's acks stand,
+    // the rest stay queued for a later drain.
+    expect(result).toEqual({ pushed: 2, acked: 2, rejected: 0 });
+    expect(result.aborted).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(2);
+    expect(await db.outbox.count()).toBe(2);
+  });
+
   it("acks applied, duplicate, and discarded_stale", async () => {
     const db = harness("ack");
     await db.outbox.bulkAdd([

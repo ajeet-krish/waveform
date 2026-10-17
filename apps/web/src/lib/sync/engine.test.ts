@@ -24,9 +24,9 @@ import { CONFLICT_LOG_KEY, setMeta } from "./meta";
 const openDbs: WaveformDb[] = [];
 const engines: SyncEngine[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const engine of engines) {
-    engine.stop();
+    await engine.stop();
   }
   engines.length = 0;
   for (const db of openDbs) {
@@ -228,6 +228,8 @@ function harness(options: HarnessOptions = {}) {
     pushes,
     /** Completed non-aborted runs: pullAll always asks for exercises first. */
     runs: () => pulled.filter((entity) => entity === "exercises").length,
+    /** Every entity the pull API was asked for, in call order. */
+    pulledEntities: () => [...pulled],
     setPush: (handler: PushHandler | undefined) => {
       pushHandler = handler;
     },
@@ -297,10 +299,108 @@ describe("createSyncEngine single flight", () => {
 
   it("answers requests with a resolved promise once stopped", async () => {
     const h = harness();
-    h.engine.stop();
+    await h.engine.stop();
     await h.engine.requestSync("manual");
     expect(h.runs()).toBe(0);
     expect(h.engine.status()).toBe("idle");
+  });
+
+  it("stop() waits for the in-flight run and aborts it between units", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let firstPull = true;
+    const h = harness({
+      pull: async (params) => {
+        if (params.entity === "exercises" && firstPull) {
+          firstPull = false;
+          await gate;
+        }
+        return { rows: [], next_cursor: null };
+      },
+    });
+
+    const started = h.engine.start();
+    await waitFor(() => h.pulledEntities().length === 1);
+    expect(h.engine.status()).toBe("syncing");
+
+    const stopped = h.engine.stop();
+    let settled = false;
+    void stopped.then(() => {
+      settled = true;
+    });
+    await settle();
+    // The run is still parked inside the gated pull, so stop() has not
+    // resolved even though the status already flipped to idle.
+    expect(settled).toBe(false);
+    expect(h.engine.status()).toBe("idle");
+
+    release();
+    await stopped;
+    await started;
+    expect(settled).toBe(true);
+    // The stop was seen between pages: the run aborted after exercises
+    // rather than walking the remaining entities.
+    expect(h.pulledEntities()).toEqual(["exercises"]);
+  });
+
+  it("stop() from the run's synchronous prefix still waits for that run", async () => {
+    const db = createWaveformDb(`engine-${crypto.randomUUID()}`);
+    openDbs.push(db);
+    watchOutboxWrites(db);
+    const timers = fakeTimers();
+    const online = fakeTarget();
+    const visibility = fakeTarget();
+
+    const stub: SyncApi = {
+      async push(ops): Promise<PushResponse> {
+        return applied(ops);
+      },
+      async pull(): Promise<PullPage> {
+        return { rows: [], next_cursor: null };
+      },
+    };
+
+    let engine!: SyncEngine;
+    let stopPromise: Promise<void> | null = null;
+    let stopResolved = false;
+    const setTimeoutFn = (fn: () => void, ms: number): SyncTimerHandle => {
+      // The waking probe is scheduled inside requestSync's synchronous
+      // prefix, after currentRun must already be assigned. Stop
+      // re-entrantly from here: a stop that missed the run would resolve
+      // before it settled.
+      if (stopPromise === null && ms === SYNC_WAKING_MS) {
+        stopPromise = engine.stop();
+        void stopPromise.then(() => {
+          stopResolved = true;
+        });
+      }
+      return timers.setTimeoutFn(fn, ms);
+    };
+    engine = createSyncEngine({
+      db,
+      api: () => stub,
+      setTimeoutFn,
+      clearTimeoutFn: timers.clearTimeoutFn,
+      onlineTarget: online,
+      visibilityTarget: visibility,
+      isVisible: () => true,
+    });
+    engines.push(engine);
+
+    const started = engine.start();
+    expect(stopPromise).not.toBeNull();
+
+    // Exactly one microtask: a fresh resolved promise (the missed-run bug)
+    // would already have resolved, while the real in-flight run has not.
+    await Promise.resolve();
+    expect(stopResolved).toBe(false);
+
+    await stopPromise;
+    await started;
+    expect(stopResolved).toBe(true);
+    expect(engine.status()).toBe("idle");
   });
 });
 
@@ -340,7 +440,7 @@ describe("createSyncEngine triggers", () => {
     await waitFor(() => h.runs() >= 2);
     expect(h.runs()).toBe(2);
 
-    h.engine.stop();
+    await h.engine.stop();
     h.online.fire("online");
     await settle();
     expect(h.runs()).toBe(2);
@@ -520,7 +620,7 @@ describe("createSyncEngine poll", () => {
     await waitFor(() => h.runs() >= 1);
     expect(h.runs()).toBe(1);
 
-    h.engine.stop();
+    await h.engine.stop();
     expect(h.timers.pending()).toEqual([]);
 
     h.timers.advance(SYNC_POLL_MS * 3);

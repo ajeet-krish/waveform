@@ -7,12 +7,22 @@ import { ApiError } from "../api";
 import {
   CONFLICT_LOG_CAP,
   CLIENT_PULL_ORDER,
+  FULL_REPULL_INTERVAL_MS,
+  dueForFullRepull,
   mergePullRow,
   pullAll,
   type PullConflictEntry,
   type SyncPullApi,
 } from "./pull";
-import { CONFLICT_LOG_KEY, LAST_SYNCED_AT_KEY, getMeta, pullCursorKey, setMeta } from "./meta";
+import {
+  CONFLICT_LOG_KEY,
+  FULL_PULL_PENDING_KEY,
+  LAST_FULL_PULL_AT_KEY,
+  LAST_SYNCED_AT_KEY,
+  getMeta,
+  pullCursorKey,
+  setMeta,
+} from "./meta";
 
 const STAMP = "2026-10-14T00:00:00.000Z";
 
@@ -244,6 +254,34 @@ function scriptedPull(
   return { api, calls };
 }
 
+describe("dueForFullRepull", () => {
+  const now = new Date(STAMP);
+
+  it("is due when never run or when the stamp is unparseable", () => {
+    expect(dueForFullRepull(null, now)).toBe(true);
+    expect(dueForFullRepull("not-a-date", now)).toBe(true);
+  });
+
+  it("is not due within the interval and due at or past it", () => {
+    const recent = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const stale = new Date(now.getTime() - FULL_REPULL_INTERVAL_MS).toISOString();
+    expect(dueForFullRepull(recent, now)).toBe(false);
+    expect(dueForFullRepull(stale, now)).toBe(true);
+  });
+
+  it("is due when the stored stamp is in the future", () => {
+    // A backward clock step must not suppress the safety net indefinitely.
+    const future = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+    expect(dueForFullRepull(future, now)).toBe(true);
+  });
+
+  it("honors a custom interval", () => {
+    const thirtyMin = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
+    expect(dueForFullRepull(thirtyMin, now, 60 * 60 * 1000)).toBe(false);
+    expect(dueForFullRepull(thirtyMin, now, 15 * 60 * 1000)).toBe(true);
+  });
+});
+
 describe("pullAll", () => {
   it("pages every entity to the tip, persists cursors, stamps last_synced_at", async () => {
     const db = harness("full");
@@ -275,18 +313,109 @@ describe("pullAll", () => {
     expect(await getMeta(db, LAST_SYNCED_AT_KEY)).toBe(STAMP);
   });
 
-  it("resumes from a previously persisted cursor", async () => {
+  it("resumes from a previously persisted cursor when a full re-pull is not due", async () => {
     const db = harness("resume");
+    const recent = new Date(new Date(STAMP).getTime() - 60 * 60 * 1000).toISOString();
     await setMeta(db, pullCursorKey("workout_sessions"), "cursor-9");
+    await setMeta(db, LAST_FULL_PULL_AT_KEY, recent);
     const { api, calls } = scriptedPull(new Map());
 
     const result = await pullAll({ db, api, now: new Date(STAMP) });
     expect(result.complete).toBe(true);
     const sessionCalls = calls.filter((c) => c.entity === "workout_sessions");
     expect(sessionCalls).toEqual([{ entity: "workout_sessions", cursor: "cursor-9" }]);
+    // A not-due run leaves the full-pull stamp exactly where it was.
+    expect(await getMeta(db, LAST_FULL_PULL_AT_KEY)).toBe(recent);
   });
 
-  it("an empty run over six entities completes with no writes", async () => {
+  it("starts a due full re-pull from the beginning without deleting cursors", async () => {
+    const db = harness("due-repull");
+    await db.workout_sessions.put(sessionRow("s1", "2026-10-13T00:00:00.000Z", "local"));
+    await setMeta(db, pullCursorKey("workout_sessions"), "cursor-old");
+    await setMeta(db, LAST_FULL_PULL_AT_KEY, "2026-10-01T00:00:00.000Z");
+
+    const { api, calls } = scriptedPull(
+      new Map([
+        [
+          "workout_sessions",
+          [
+            {
+              rows: [pullRow(sessionRow("s1", "2026-10-13T00:00:00.000Z", "server-again"))],
+              next_cursor: null,
+            },
+          ] as Array<PullPage | ApiError>,
+        ],
+      ]),
+    );
+
+    const result = await pullAll({ db, api, now: new Date(STAMP) });
+
+    // The stored cursor was ignored: the walk started from null.
+    const sessionCalls = calls.filter((c) => c.entity === "workout_sessions");
+    expect(sessionCalls).toEqual([{ entity: "workout_sessions", cursor: null }]);
+    // The re-sent row ties on updated_at, so the local row is kept.
+    expect((await db.workout_sessions.get("s1"))?.notes).toBe("local");
+    expect(result).toEqual({ merged: 0, conflicts: 0, complete: true });
+    expect(await getMeta(db, LAST_FULL_PULL_AT_KEY)).toBe(STAMP);
+    // A completed full pull clears the pending flag.
+    expect(await getMeta(db, FULL_PULL_PENDING_KEY)).toBeUndefined();
+  });
+
+  it("leaves the pending flag set and cursors in place when a due run aborts", async () => {
+    const db = harness("due-abort");
+    await setMeta(db, pullCursorKey("workout_sessions"), "cursor-old");
+    const { api } = scriptedPull(
+      new Map([
+        [
+          "exercises",
+          [new ApiError("offline", "The server could not be reached.")] as Array<
+            PullPage | ApiError
+          >,
+        ],
+      ]),
+    );
+
+    const result = await pullAll({ db, api, now: new Date(STAMP) });
+
+    expect(result.complete).toBe(false);
+    // The interrupted full walk leaves the flag set and does not delete
+    // the stored cursor, so the next run can resume incrementally.
+    expect(await getMeta(db, FULL_PULL_PENDING_KEY)).toBe(true);
+    expect(await getMeta(db, pullCursorKey("workout_sessions"))).toBe("cursor-old");
+    expect(await getMeta(db, LAST_FULL_PULL_AT_KEY)).toBeUndefined();
+  });
+
+  it("degrades an interrupted full pull to an incremental resume, then completes", async () => {
+    const db = harness("pending-resume");
+    await setMeta(db, pullCursorKey("workout_sessions"), "cursor-old");
+    await setMeta(db, LAST_FULL_PULL_AT_KEY, "2026-10-01T00:00:00.000Z");
+
+    // First attempt: exercises errors immediately, aborting the walk.
+    const first = scriptedPull(
+      new Map([
+        [
+          "exercises",
+          [new ApiError("offline", "gone")] as Array<PullPage | ApiError>,
+        ],
+      ]),
+    );
+    const aborted = await pullAll({ db, api: first.api, now: new Date(STAMP) });
+    expect(aborted.complete).toBe(false);
+    expect(await getMeta(db, FULL_PULL_PENDING_KEY)).toBe(true);
+
+    // Second attempt: the flag is set, so the walk resumes from the stored
+    // cursor instead of re-downloading everything from the top.
+    const second = scriptedPull(new Map());
+    const resumed = await pullAll({ db, api: second.api, now: new Date(STAMP) });
+    expect(resumed.complete).toBe(true);
+    const sessionCalls = second.calls.filter((c) => c.entity === "workout_sessions");
+    expect(sessionCalls).toEqual([{ entity: "workout_sessions", cursor: "cursor-old" }]);
+    // Completion stamps the full-pull time and clears the flag.
+    expect(await getMeta(db, LAST_FULL_PULL_AT_KEY)).toBe(STAMP);
+    expect(await getMeta(db, FULL_PULL_PENDING_KEY)).toBeUndefined();
+  });
+
+  it("an empty run over six entities completes with no row merges", async () => {
     const db = harness("empty");
     const { api } = scriptedPull(new Map());
 

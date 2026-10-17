@@ -945,3 +945,115 @@ guard unreachable in practice.
   separately: at-least-once per drain with call counting, and quarantine across drains with
   `attempts` assertions. If an adapted test must seed the end state instead of driving it, say why
   in a comment and keep the end-to-end drive in one suite.
+
+## 2026-10-16 - Tier 1.3-1.4 shared-device ownership and cursor (code review)
+
+**Scope**: uncommitted Tier 1 phases 1.3 and 1.4. `apps/web/src/lib/sync/ownership.ts` and
+`ownership.test.ts` (new), `adoption.ts` and `adoption.test.ts`, `appData.tsx`, `session.ts` and
+`session.test.ts`, `sync/meta.ts`, `sync/pull.ts` and `pull.test.ts`, `routes/Account.tsx`, and the
+docs updates. Files read in full and traced by hand; no shell in this environment, so `git diff`
+and the test runner were not executed. Recommend a green `pnpm test --filter @waveform/web`,
+`pnpm lint`, and `cargo test export_ts` (unchanged here) before merge.
+
+**Verdict: FAIL** (1 Critical, 1 High, 4 Medium, 3 Low). The one-transaction wipe, the
+per-source classification, and the pull safety net are largely sound and well tested, but
+sign-out by a non-owner account on a foreign device deletes the adoption marker while keeping
+the foreign rows, which re-opens the exact cross-account adoption hole phase 1.3 exists to
+close. `ownership.test.ts:439-456` currently pins that unsafe behavior.
+
+### Check Results
+
+| Check | Verdict | Details |
+|-------|---------|---------|
+| 1. Wipe correctness (isolation, orphans, one transaction, keep list, child-op scoping) | PASS with issues | One rw transaction over every touched table (ownership.ts:238-251), direct table deletes queue no ops, keep list correct (`local_profile`, `api_base_url`, tested at ownership.test.ts:433-436). Cascade is complete for live and tombstoned parents (deletes are soft, so parents are present in `sessionIdSet`/`entryIdSet`). FAILs on the unconditional marker delete (F1) and cross-account scratch clears (F4). |
+| 2. classifyOwnership fresh/mine/foreign | FAIL | The normal first-sign-in upload path is safe (adoption.test.ts:280-288 plus one mine case per owner source), but a genuinely foreign log is misclassified as "mine" after the F1 marker loss, and backup imports can misclassify in both directions (F1, F6). |
+| 3. Sign-out ordering and failure modes | FAIL | Server failure and wipe-throw paths are correct and tested (session.test.ts:183-226), but `engine.stop()` does not cancel an in-flight run and `account.logout` does not await one, so a pull mid-flight can repopulate wiped rows (F2). Fallback failure text also lies (F7). |
+| 4. ForeignOwnerError enforcement | PASS with issues | Thrown as the first step of `adoptLocalUser`'s transaction before any write (adoption.ts:118-123), tested with untouched-state assertions (adoption.test.ts:272-296); UI is presentational. Softened by the evaluateAuth fail-open (F5) and by ordinary screens still writing through repos bound to the foreign id (F5). |
+| 5. pullAll safety net | PASS with issues | Cursor clear then null-cursor walk re-delivers everything; LWW tie-keep is idempotent (pull.test.ts:324-353); stamp only on complete (pull.test.ts:355-376). An aborted due run re-clears cursors on every attempt (F3); clock step-back can delay the interval indefinitely (F8). |
+| 6. Test quality | PASS with issues | All eight named claims are covered except the two that matter most for deletion safety: the cross-account sign-out sequence (F1) and an in-flight run during wipe (F2). The suite actively asserts the F1 bug. |
+
+### Findings
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Critical | ownership.ts:324, ownership.ts:195-197, Account.tsx:449, appData.tsx:248-254 | `wipeAccountDataFromDevice` deletes `adopted_user_id` unconditionally, even when the marker names a different account. On a foreign device, ForeignOwnerPanel's Sign Out calls `logout` for the signed-in account (which owns no rows), so the wipe removes nothing of the foreign log but destroys its claim marker (and cursors, conflict log, all drafts). With the marker gone, `classifyOwnership` falls back to trusting `local_profile.id` (which adoption re-keyed to the foreign account's id) as "this device's own", so the next sign-in by ANYONE classifies the foreign log as "mine" and the first-sign-in panel offers "Upload my existing local data", silently rebasing and publishing one account's log under another. The ADR trade-off ("harmless because its rows were wiped") assumes the wiped rows belong to the marker's account, which is false on this path. ownership.test.ts:455 pins the unsafe clearing. | Delete `ADOPTED_USER_ID_KEY` only when its value is `userId` (a sign-out must never unclaim another account's device). Gate the scratch clears (at least `workout_drafts`) the same way. Change ownership.test.ts:439-456 to expect a foreign marker to survive, and add a regression: seed marker USER_B plus USER_B rows, `wipeAccountDataFromDevice(db, USER_A)`, expect marker kept and `classifyOwnership(db, USER_C)` still foreign. |
+| High | engine.ts:530-536, engine.ts:427-450, pull.ts:346-393, appData.tsx:501-514 | `engine.stop()` only bumps the epoch and detaches triggers; the epoch is checked between phases (after compact, drain, pullAll) but never inside `pullAll`'s page loop or `drainOutbox`'s op loop. `account.logout` stops the engine and immediately awaits the server logout round trip plus the wipe, so a pull already in flight keeps merging pages during and after the wipe, re-landing the signed-out account's rows and `pull_cursor:*` keys on a device the wipe just cleaned (violates "sign-out ALWAYS removes the account's synced copy" and, combined with F1's marker loss, feeds the same misclassification hole). | Make `stop()` return a promise that resolves when `currentRun` settles and have `account.logout` await it before the server call; also thread the epoch (or an AbortSignal) into `pullAll`'s per-page loop and `drainOutbox`'s per-op loop so a stop takes effect within one page. |
+| Medium | pull.ts:337-344, pull.ts:396-399 | Full re-pull storm: every due attempt clears all cursors and only a complete run stamps `last_full_pull_at`, so a device that repeatedly aborts mid-walk (flaky link, large account, free-tier wakeups) discards cross-run cursor progress on each attempt and re-downloads the full page set forever, potentially never completing (so the safety net "fires" but never lands). | Persist a `full_pull_pending` marker when the cursors are cleared; while it is set, skip the clear and resume the walk from the persisted cursors; remove it when stamping `last_full_pull_at`. |
+| Medium | appData.tsx:305-313, appData.tsx:319-324, appData.tsx:361 | Enforcement fail-open and foreign writes: when `classifyOwnership` throws, `evaluateAuth` assumes "mine", binds repos, and starts the engine (a rare but real path onto a foreign device). Separately, on a foreign device the repos stay bound to the profile id (bootstrap), so ordinary screens still edit the foreign log and queue ops stamped with the foreign owner id, which push under that account when its owner signs back in, even though the panel deliberately offers no upload. | On a classification read failure, stop the engine and surface an "unknown" state instead of assuming mine. While `deviceOwnership` is foreign, bind repos to a null/limbo user or make them read-only so no edit can be queued against the foreign log. |
+| Medium | ownership.ts:323-326 | Cross-account scratch collateral: a wipe for a user with no data on the device still clears ALL `workout_drafts`, the conflict log, and every cursor. On the foreign sign-out path this destroys another account's in-progress drafts (the sign-out dialog never warns about them). | Scope the scratch clears to a wipe that actually names the device's owner (see F1 fix), or at minimum keep drafts when the marker names a different account. |
+| Medium | backupImport.ts:570-574, backupImport.ts:647-648, ownership.ts:195-197 | Classification vs backup restore: merging a backup from another device (rows stamped with that device's pre-account profile id) yields mixed stamps and a "foreign" verdict that locks the user out of their own restored data with no adopt action; conversely replace mode restores the backup's profile row, so someone else's account backup classifies as "mine" and adopts. | Treat an imported backup's stamps as adoptable (re-stamp to the local profile id at import, or record an import provenance marker `classifyOwnership` accepts), and never restore a foreign profile id when a local one exists. |
+| Low | Account.tsx:18 | The `SIGNOUT_FAILURE` fallback claims "you are signed out on this device" but it is shown when the local wipe threw, in which case the session is deliberately kept and the user is still signed in. | Split the message: a wipe failure should say the local copy could not be removed and sign-out did not happen, and offer retry. |
+| Low | ownership.ts:321-326, ownership.test.ts:436 | `last_synced_at` survives the wipe, so the next account on the device sees the previous account's "Last synced" stamp; `last_full_pull_at` survives too (harmless: cleared cursors force a full walk regardless). | Delete `last_synced_at` with the other per-account bookkeeping, or label it device-scoped in the UI. |
+| Low | pull.ts:86-93 | `dueForFullRepull` never fires while the client clock sits behind the stored stamp (a backward step of more than 12h delays the safety net by the skew). | Clamp `now - last` at zero is not enough; also treat `last > now + interval` as due (a stamp from the future is drift). |
+
+### Test gaps that matter for a data-deletion feature
+
+- No test drives the foreign-panel sign-out sequence: marker USER_B plus USER_B rows, wipe as
+  USER_A, then `classifyOwnership` for a third account must still be foreign (currently the
+  opposite is asserted at ownership.test.ts:455).
+- No test pins that an in-flight `pullAll` cannot write after `stop()` plus wipe (an engine test
+  with a stub api whose pull resolves after `stop()` would pin F2).
+- No test for the aborted-due-run retry loop (two consecutive incomplete due runs both clearing
+  cursors), which is the F3 storm behavior.
+- Child-op scoping is tested for live parents only; a `set_entries` op whose `exercise_entry_id`
+  names a row already gone (hard-purged parent) is out of scope of the delete rules and survives.
+  Benign today because deletes are soft tombstones, but worth one test if hard purges ever land.
+- Covered well and worth keeping: one mine case per owner source, mixed-stamp foreign, two-user
+  wipe isolation for rows and ops, no ops queued, profile and `api_base_url` kept, foreign
+  adoption refusal with untouched state, full re-pull tie-keep idempotence, stamp only on
+  complete, cursor and page atomicity.
+
+### Verification Checklist
+
+- [ ] All checks passed (2 FAIL, 4 PASS with issues)
+- [ ] No critical issues found (1 Critical: F1)
+- [x] Code follows project conventions (strict TS, no `any`, SCREAMING_SNAKE consts, snake_case
+      locals, PascalCase types, K&R braces, `#pragma`-free module docs in the house style)
+- [x] No em dashes, double hyphens, or dash equivalents; use proper punctuation
+- [x] Phase code integrates cleanly with prior phases (adoption, engine, and pull extensions are
+      additive; `ForeignOwnerError` reuses `LocalValidationError` handling; `meta.ts` keys are
+      namespaced and backward compatible)
+- [ ] Command gates NOT RUN: no shell in this review environment
+
+### Recurring patterns for other agents
+
+- A device-level marker that gates a trust rule (here `adopted_user_id` gating the
+  `local_profile.id` acceptance) must only be removable by the account it names; an
+  unconditional delete in a "cleanup everything" path silently downgrades the trust rule.
+- "Stop the engine" must mean "the run loop observes the stop within one unit of work"; a phase
+  level epoch check does not bound work inside a page or op loop, and any destructive local
+  operation that races sync must await the in-flight run, not just detach triggers.
+- When a safety net retries from scratch on every aborted attempt, pin the retry storm
+  separately from the single-retry behavior the ADR describes; the two differ exactly on flaky
+  links where the feature matters most.
+
+## 2026-10-16 - Tier 1.3-1.4 fix verification
+
+Verdict: PASS. All Critical and High findings (F1, F2) are resolved as prescribed; F3, F5
+(fail-open half), F6, and F7 are fixed; F4 and F8 are resolved by the F1 gate. Static
+verification only, no shell in this environment.
+
+| Fix | Verdict | Details |
+|-----|---------|---------|
+| F1 wipe gating (Critical) | PASS | `deviceOwnedByUser` (ownership.ts:233-243) gates all six scratch items behind a check computed before any delete (ownership.ts:291, 365-372). Foreign-panel regression test wipes as USER_A on a USER_B device and asserts marker, cursors, conflict log, drafts, last_synced_at survive and `classifyOwnership(db, USER_C)` is still "foreign" (ownership.test.ts:461-488); the old bug-pinning expectation was flipped (ownership.test.ts:441-459). |
+| F2 stop/abort (High) | PASS | `stop()` resolves only after `currentRun` settles (engine.ts:541-553); `shouldStop` threaded into drain batches (drain.ts:115) and pull pages (pull.ts:365); `account.logout` awaits it before the server call and wipe (appData.tsx:513-527). engine.test.ts:308-346 pins the wait and the between-page abort; drain.test.ts:138-166 and pull.test.ts:440-461 pin settled work standing. |
+| F3 full re-pull flag (Medium) | PASS | `full_pull_pending` set on a due run, walk from null cursor without deleting stored cursors (pull.ts:352-363), pending resumes incrementally, completion stamps and clears (pull.ts:416-421). Tests at pull.test.ts:325-410 cover all three legs. |
+| F5 fail-closed unknown (Medium) | PASS with issues | classifyOwnership throw yields "unknown", stops the engine, binds no repos (appData.tsx:308-324). No automated test covers this path. The prior finding's second clause (foreign-device repos stay bound to the profile id) is carried over, unchanged. |
+| F6 import re-stamping (Medium) | PASS with issues | Rows re-stamped to the local profile id in both modes, catalog owner_id stays null, op payloads carry the restamped rows (backupImport.ts:543-738); existing local_profile id never replaced (backupImport.ts:717-720). Tests at backupImport.test.ts:559-590, 928-960. Edge: a profile-less device importing a profile-less backup keeps the file's stamps (backupImport.ts:589, 663). |
+| F7 sign-out copy (Low) | PASS | SIGNOUT_FAILURE now says the local copy could not be removed and the user is still signed in (Account.tsx:18-19), matching session.test.ts:209-226. |
+
+Residual findings (no Critical or High):
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium (carried) | appData.tsx:373, 330-335 | On a foreign device the repos stay bound to the local_profile id from bootstrap, so ordinary screens can still edit the foreign log and queue ops stamped with the foreign owner id (prior F5 second clause, out of this fix scope). | Unbind repos or make them read-only while deviceOwnership is foreign or unknown. |
+| Low | ownership.ts:365-372 | The owned wipe does not delete `FULL_PULL_PENDING_KEY`; behaviorally inert today (cleared cursors force a from-null walk anyway) but stale state. | Delete it in the same `if (owned)` block. |
+| Low | appData.tsx:308-324 | The F5 "unknown" path has no automated test (no appData test harness), so fail-closed behavior is proven only by reading. | Extract the decision or add a provider-level test that makes classifyOwnership throw. |
+| Low | backupImport.ts:589, 663 | A profile-less device importing a backup with no profile keeps the file's foreign stamps (nothing to re-stamp to), so a later sign-in classifies the restored log foreign and refuses adoption. | Stamp nothing and record an import provenance marker, or document the corner. |
+| Low (carried) | pull.ts:86-99 | dueForFullRepull never fires while the client clock sits behind a stored stamp (prior F9, out of this fix scope). | Treat a stamp in the future as due. |
+| Low | engine.ts:521 | A re-entrant stop() during requestSync's synchronous prefix resolves before `currentRun` is registered; theoretical (only reachable via a synchronous effect on the status signal) and the logout flow is still safe because the wipe follows the awaited server call. | Set `currentRun` before the chain body runs, or have stop() also consult `running`. |
+
+Regression sweep: no new correctness or data-loss bug found in the wipe (owned deletes cover
+exactly the target's rows and scoped child ops), the stop/abort threading (partial drain and
+pull results stand, cursors and merges stay atomic per page), the import re-stamping (rows and
+op payloads match, catalog rows stay null), or the pending-flag lifecycle.

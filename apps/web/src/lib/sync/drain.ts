@@ -45,6 +45,14 @@ export type DrainOptions = {
   api: SyncPushApi;
   /** Batch cap; defaults to the server-agreed maxOpsPerPush (200). */
   cap?: number;
+  /**
+   * Consulted at the top of every batch iteration; a true answer returns
+   * the partial result with no `aborted` reason, since earlier batches
+   * are already settled (their ops are removed or their failures
+   * recorded) and stand. Callers that pass this must treat such a return
+   * as an incomplete drain, not as "queue emptied".
+   */
+  shouldStop?: () => boolean;
 };
 
 export type DrainResult = {
@@ -104,6 +112,11 @@ export async function drainOutbox(options: DrainOptions): Promise<DrainResult> {
   const deferred = new Set<string>();
 
   for (;;) {
+    if (options.shouldStop?.() === true) {
+      // A stop between batches: earlier batches are already settled, so
+      // the partial result stands and the remaining ops stay queued.
+      return result;
+    }
     // Excluding deferred ids here (not only when slicing the batch) is
     // what lets the loop reach ops sitting behind a deferred first
     // batch instead of exiting with them unattempted.

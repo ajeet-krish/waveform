@@ -2,6 +2,38 @@
 
 Last updated: 2026-10-16
 
+## 2026-10-16 - Tier 1: Shared-device ownership, always-remove sign-out, and pull-cursor safety net (Test note)
+
+Tier 1 phases 1.3 and 1.4 add ownership classification and a one-account device wipe
+(`apps/web/src/lib/sync/ownership.ts`), a foreign-owner refusal at the start of
+`adoptLocalUser`, a mandatory local removal on sign-out (the auth store gained an optional
+`onBeforeSignOut` hook that runs before the state flips), a foreign-device Account panel,
+and a periodic full re-pull behind the pull cursor (`dueForFullRepull`, 12 hours).
+
+### Totals
+
+| Suite | Files | Tests | Notes |
+|-------|-------|-------|-------|
+| Web (`apps/web`) | 46 | 483 | vitest; +1 file (`ownership.test.ts`) and +35 tests across it, `adoption.test.ts`, `pull.test.ts`, `engine.test.ts`, `drain.test.ts`, `backupImport.test.ts`, and `session.test.ts` |
+
+`npx pnpm@10 --filter @waveform/web test`: 46 files, 483 passed, 0 failed.
+`npx pnpm@10 --filter @waveform/web lint`: `tsc -p tsconfig.json --noEmit`, clean.
+
+New coverage: `ownership.test.ts` (OWNERSHIP_SOURCES completeness, fresh / mine / foreign
+classification with one case per owner source plus mixed-stamp, adopted, marker-only, and
+outbox-only foreign cases, the one-account wipe keeping the other account's rows, the
+profile, and the address override while queueing no ops, and a foreign panel's sign-out
+leaving the marker and scratch so the log still classifies as foreign); `adoption.test.ts`
+(foreign adoption throws `ForeignOwnerError` and modifies nothing); `pull.test.ts` (due vs
+not-due scheduling, a from-scratch re-merge whose tie keeps the local row, an aborted due
+run leaving the pending flag and cursors so the next run resumes incrementally, and the
+complete-only `last_full_pull_at` stamp); `engine.test.ts` (a `stop()` that does not
+resolve until a gated in-flight run settles and that aborts the run between pages);
+`drain.test.ts` (a stop between batches keeps settled work and leaves the rest queued);
+`backupImport.test.ts` (merge and replace re-stamp imported owners onto the local profile
+id and never overwrite it); `session.test.ts` (the sign-out hook runs before the state
+flips even when the server call fails, and a throwing hook keeps the session).
+
 ## 2026-10-16 - Sync poll trigger hardening (Test note)
 
 The client sync engine (`apps/web/src/lib/sync/engine.ts`) now has a periodic poll trigger: an

@@ -119,6 +119,14 @@ export type AuthStoreOptions = {
   api: AuthApi;
   /** Storage override for tests; defaults to localStorage (or none). */
   storage?: SessionStorageLike | null;
+  /**
+   * Runs inside logout after the best-effort server call and before the
+   * local session is cleared: the seam app-data uses to remove this
+   * account's synced data from the device before the app reads as signed
+   * out. A throw here leaves the session in place so the caller can
+   * report the failure.
+   */
+  onBeforeSignOut?: (userId: string | null) => Promise<void> | void;
 };
 
 export type AuthStore = {
@@ -173,6 +181,11 @@ export function createAuthStore(options: AuthStoreOptions): AuthStore {
         await options.api.logout();
       } catch {
         // The token may already be dead; local sign-out proceeds anyway.
+      }
+      // The device wipe runs before the state flips: an offline server
+      // call must not stop this account's local copy from being removed.
+      if (options.onBeforeSignOut !== undefined) {
+        await options.onBeforeSignOut(user()?.id ?? null);
       }
       clearSession(storage);
       setUser(null);

@@ -556,6 +556,39 @@ describe("applyBackupImport: merge", () => {
     expect(ops[0]?.action).toBe("create");
   });
 
+  it("re-stamps imported rows onto the local profile id, not the backup's", async () => {
+    const db = harness("merge-restamp");
+    await db.local_profile.put({ ...sampleProfile("Grace"), id: "local-user" });
+
+    // A backup made by another account: its rows and profile carry a
+    // foreign id that must not travel onto this device.
+    const backup = sampleBackup();
+    backup.profile = { ...sampleProfile("Ada"), id: "foreign-user" };
+    backup.exercises = backup.exercises.map((row) =>
+      row.owner_id === null ? row : { ...row, owner_id: "foreign-user" },
+    );
+    backup.workout_sessions = backup.workout_sessions.map((row) => ({
+      ...row,
+      user_id: "foreign-user",
+    }));
+    backup.activities = backup.activities.map((row) => ({ ...row, user_id: "foreign-user" }));
+    backup.body_stats = backup.body_stats.map((row) => ({ ...row, user_id: "foreign-user" }));
+
+    const summary = await applyBackupImport(db, backup, { mode: "merge", now: importNow() });
+
+    expect(summary.profileRestored).toBe(false);
+    expect((await db.local_profile.toArray())[0]?.id).toBe("local-user");
+    expect((await db.workout_sessions.get("sess-1"))?.user_id).toBe("local-user");
+    expect((await db.activities.get("act-1"))?.user_id).toBe("local-user");
+    expect((await db.body_stats.get("body-1"))?.user_id).toBe("local-user");
+    expect((await db.exercises.get("ex-zettel"))?.owner_id).toBe("local-user");
+    // Global catalog rows stay server-owned.
+    expect((await db.exercises.get(BENCH_SEED_ID))?.owner_id).toBeNull();
+    // The queued op carries the re-stamped owner, never the foreign one.
+    const exerciseOp = (await db.outbox.toArray()).find((op) => op.entity === "exercises");
+    expect((exerciseOp?.payload as { owner_id: string | null }).owner_id).toBe("local-user");
+  });
+
   it("is idempotent: a second identical import writes nothing and queues nothing", async () => {
     const db = harness("merge-idempotent");
     const first = await applyBackupImport(db, sampleBackup(), { mode: "merge", now: importNow() });
@@ -890,6 +923,40 @@ describe("applyBackupImport: replace", () => {
     expect(await db.workout_drafts.get("draft-1")).toEqual(draft);
     expect((await db.local_profile.toArray())[0]?.display_name).toBe("Ada");
     expect(summary.profileRestored).toBe(true);
+  });
+
+  it("keeps the local profile id on replace and re-stamps rows onto it", async () => {
+    const db = harness("replace-restamp");
+    await db.local_profile.put({ ...sampleProfile("Grace"), id: "local-user" });
+
+    const backup = sampleBackup();
+    backup.profile = { ...sampleProfile("Ada"), id: "foreign-user" };
+    backup.exercises = backup.exercises.map((row) =>
+      row.owner_id === null ? row : { ...row, owner_id: "foreign-user" },
+    );
+    backup.workout_sessions = backup.workout_sessions.map((row) => ({
+      ...row,
+      user_id: "foreign-user",
+    }));
+    backup.activities = backup.activities.map((row) => ({ ...row, user_id: "foreign-user" }));
+    backup.body_stats = backup.body_stats.map((row) => ({ ...row, user_id: "foreign-user" }));
+
+    const summary = await applyBackupImport(db, backup, {
+      mode: "replace",
+      confirmReplace: true,
+      now: importNow(),
+    });
+
+    // The backup's display fields fill in, but the local identity stands.
+    expect(summary.profileRestored).toBe(true);
+    const profile = (await db.local_profile.toArray())[0];
+    expect(profile?.id).toBe("local-user");
+    expect(profile?.display_name).toBe("Ada");
+    expect((await db.workout_sessions.get("sess-1"))?.user_id).toBe("local-user");
+    expect((await db.activities.get("act-1"))?.user_id).toBe("local-user");
+    expect((await db.body_stats.get("body-1"))?.user_id).toBe("local-user");
+    expect((await db.exercises.get("ex-zettel"))?.owner_id).toBe("local-user");
+    expect((await db.exercises.get(BENCH_SEED_ID))?.owner_id).toBeNull();
   });
 
   it("keeps the local profile when the backup carries none", async () => {

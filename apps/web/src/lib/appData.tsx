@@ -40,6 +40,12 @@ import { adoptLocalUser, adoptStartEmpty, needsAdoption } from "./sync/adoption"
 import { createSyncEngine, type SyncStatus } from "./sync/engine";
 import { API_BASE_URL_KEY, getMeta, setMeta } from "./sync/meta";
 import {
+  classifyOwnership,
+  isWriteBlocked,
+  wipeAccountDataFromDevice,
+  type DeviceOwnership,
+} from "./sync/ownership";
+import {
   ensurePersistentStorage,
   guardRepos,
   isIndexedDbAvailable,
@@ -124,6 +130,21 @@ export type AppData = {
    * adopted, or just adopted).
    */
   adoptionNeeded: Accessor<boolean | null>;
+  /**
+   * What this device holds for the signed-in account: "fresh" (nothing),
+   * "mine" (adoptable), "foreign" (another account's log, which the
+   * Account screen offers to export, remove, or sign out of), or
+   * "unknown" (the ownership read failed, so sync stays off). Null while
+   * signed out or before the check resolves.
+   */
+  deviceOwnership: Accessor<DeviceOwnership | null>;
+  /**
+   * True while the Shell must keep the write console away: this device
+   * holds another account's log ("foreign"), or its ownership could not
+   * be read ("unknown"). False while signed out or on this device's own
+   * log (fresh or mine).
+   */
+  writeBlocked: Accessor<boolean>;
   /** The stored address override; null means the build's default. */
   apiBaseUrlOverride: Accessor<string | null>;
   /** The address sync uses right now; null when none resolves. */
@@ -157,6 +178,7 @@ export function AppDataProvider(props: { children: JSX.Element }) {
   const [apiOverride, setApiOverride] = createSignal<string | null>(null);
   const [apiClient, setApiClient] = createSignal<ApiClient | null>(null);
   const [adoptionNeeded, setAdoptionNeeded] = createSignal<boolean | null>(null);
+  const [deviceOwnership, setDeviceOwnership] = createSignal<DeviceOwnership | null>(null);
 
   const unsubscribe = subscribeStorageFailures((failure) => setStorageFailure(failure));
   onCleanup(unsubscribe);
@@ -232,19 +254,50 @@ export function AppDataProvider(props: { children: JSX.Element }) {
         }
       },
     },
+    onBeforeSignOut: async (userId) => {
+      // A shared or handed-down device must not keep an account's synced
+      // copy after sign-out; the server copy is untouched.
+      if (userId !== null) {
+        await wipeAccountDataFromDevice(db, userId);
+      }
+    },
   });
 
   const engine = createSyncEngine({
     db,
     api: () => (auth.state() === "signed-in" ? apiClient() : null),
   });
-  onCleanup(() => engine.stop());
+  onCleanup(() => {
+    void engine.stop();
+  });
 
   /** Latest evaluateAuth wins; a stale async check never binds or starts. */
   let authEval = 0;
 
   function bindRepos(userId: string): void {
     setRepos(guardRepos(createRepos(db, { userId })));
+  }
+
+  /**
+   * Binds repos to this device's own local profile id (the signed-out
+   * local-first console). A stale call is dropped so it cannot clobber a
+   * newer sign-in decision; a device with no profile row stays unbound.
+   */
+  async function bindLocalRepos(token: number): Promise<void> {
+    let rows: LocalProfile[];
+    try {
+      rows = await db.local_profile.toArray();
+    } catch {
+      // Storage is unavailable; bootstrap reports it and no repos bind.
+      return;
+    }
+    if (token !== authEval) {
+      return;
+    }
+    const existing = rows[0] ?? null;
+    if (existing !== null) {
+      setRepos(guardRepos(createRepos(db, { userId: existing.id })));
+    }
   }
 
   /** Re-reads the profile row (adoption re-keys it to the server id). */
@@ -258,9 +311,14 @@ export function AppDataProvider(props: { children: JSX.Element }) {
 
   /**
    * Reconciles session state with sync: signed out stops the engine,
-   * signed in checks the adoption marker (waiting out bootstrap so the
-   * address is settled first), and only an adopted device binds repos
-   * to the server user id and starts the engine.
+   * signed in classifies device ownership (waiting out bootstrap so the
+   * address is settled first). A foreign device's log is never pushed,
+   * merged, or adopted: the engine stops and the Account screen shows
+   * the export, remove, or sign out choice. A failed ownership read fails
+   * closed to "unknown": the engine stops and nothing binds, so a device
+   * of unknown ownership never syncs. Otherwise it checks the adoption
+   * marker and only an adopted device binds repos to the server user id
+   * and starts the engine.
    */
   async function evaluateAuth(): Promise<void> {
     const token = ++authEval;
@@ -268,7 +326,12 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     const user = auth.user();
     if (state !== "signed-in" || user === null) {
       setAdoptionNeeded(false);
-      engine.stop();
+      setDeviceOwnership(null);
+      void engine.stop();
+      // Signed out is the local-first console: rebind to this device's
+      // own profile row. A foreign sign-out just unbound it, and the
+      // stored profile is this device's own identity again.
+      await bindLocalRepos(token);
       return;
     }
     setAdoptionNeeded(null);
@@ -277,21 +340,41 @@ export function AppDataProvider(props: { children: JSX.Element }) {
       return;
     }
     let needed: boolean;
+    let ownership: DeviceOwnership;
     try {
       needed = await needsAdoption(db, user.id);
+      ownership = await classifyOwnership(db, user.id);
     } catch {
-      // A local read failure must not strand a live session: sync runs
-      // anyway and the next auth change re-checks the marker.
-      needed = false;
+      if (token !== authEval) {
+        return;
+      }
+      // Fail closed: a failed ownership read must not be treated as
+      // "mine", or a live session could start syncing a device whose
+      // owner is unknown. Stop the engine, leave repos unbound, and
+      // expose the unknown state; the next auth change re-checks.
+      setDeviceOwnership({ kind: "unknown" });
+      setRepos(null);
+      void engine.stop();
+      return;
     }
     if (token !== authEval) {
       return;
     }
+    setDeviceOwnership(ownership);
     setAdoptionNeeded(needed);
+    if (ownership.kind === "foreign" || ownership.kind === "unknown") {
+      // Another account's log (or an unknown device state): do not bind
+      // repos for adoption (unbind any profile-id binding bootstrap made)
+      // and do not start the engine, so nothing edits or re-syncs it into
+      // this account.
+      setRepos(null);
+      void engine.stop();
+      return;
+    }
     if (needed) {
       // The data choice comes first: starting the engine here could push
       // (or for "start-empty", resurrect) data the user is about to drop.
-      engine.stop();
+      void engine.stop();
       return;
     }
     bindRepos(user.id);
@@ -411,6 +494,7 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     }
     await refreshProfile();
     setAdoptionNeeded(false);
+    setDeviceOwnership({ kind: "mine" });
     bindRepos(user.id);
     await engine.start();
   }
@@ -463,7 +547,21 @@ export function AppDataProvider(props: { children: JSX.Element }) {
   const account: AccountActions = {
     signup: (input) => auth.signup(input),
     login: (input) => auth.login(input),
-    logout: () => auth.logout(),
+    logout: async () => {
+      // Await the stop so the in-flight run has settled before the server
+      // call and the wipe: no run can re-pull or re-push rows the wipe is
+      // removing. auth.logout then runs the server call, the local wipe
+      // (onBeforeSignOut), and the state flip in that order.
+      await engine.stop();
+      try {
+        await auth.logout();
+      } catch (cause) {
+        // The local wipe failed before the state flipped: re-evaluate so
+        // a still-signed-in app keeps a live engine, then surface it.
+        void evaluateAuth();
+        throw cause;
+      }
+    },
     adoptionChoice,
     setApiBaseUrl,
   };
@@ -501,6 +599,8 @@ export function AppDataProvider(props: { children: JSX.Element }) {
     auth,
     account,
     adoptionNeeded,
+    deviceOwnership,
+    writeBlocked: () => isWriteBlocked(deviceOwnership()),
     apiBaseUrlOverride: apiOverride,
     apiBaseUrl: resolvedApiBaseUrl,
     sync: () => syncView,

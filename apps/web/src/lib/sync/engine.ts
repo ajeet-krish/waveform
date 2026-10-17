@@ -129,8 +129,13 @@ export type SyncEngine = {
   conflicts: Accessor<number>;
   /** Starts the triggers and bootstraps a sync. Safe to call twice. */
   start(): Promise<void>;
-  /** Detaches every trigger and timer. An in-flight run stops early. */
-  stop(): void;
+  /**
+   * Detaches every trigger and timer, then resolves once any in-flight
+   * run has settled. The run is signalled to stop between units of work
+   * (a page of pull, a batch of drain), so a caller can await this before
+   * a wipe to be sure no run writes afterward.
+   */
+  stop(): Promise<void>;
   /** Requests a run; concurrent calls share one run plus one reround. */
   requestSync(reason: SyncReason): Promise<void>;
 };
@@ -421,6 +426,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       pullFailure = kind;
     });
 
+    // True once this run has been left behind (stop, halt, or a restart):
+    // threaded into the drain and pull so they stop between units of work
+    // instead of running to completion.
+    const stopped = (): boolean => runEpoch !== epoch;
+
     setStatus("syncing");
     scheduleWaking();
     let outcome: RunOutcome = "ok";
@@ -433,6 +443,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         db: deps.db,
         api,
         cap: RULE_CONSTANTS.sync.maxOpsPerPush,
+        shouldStop: stopped,
       });
       if (runEpoch !== epoch) {
         return;
@@ -440,7 +451,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       if (drained.aborted !== undefined) {
         outcome = drained.aborted;
       } else {
-        const pulled = await pullAll({ db: deps.db, api: pullApi });
+        const pulled = await pullAll({ db: deps.db, api: pullApi, shouldStop: stopped });
         if (runEpoch !== epoch) {
           return;
         }
@@ -472,7 +483,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       pendingReason = reason;
       return currentRun;
     }
-    const chain = (async () => {
+    // Assign currentRun BEFORE the chain body runs its synchronous
+    // prefix: a stop() called re-entrantly from inside that prefix (the
+    // api accessor, a timer hook) must observe the in-flight run and wait
+    // for it instead of resolving immediately and missing it.
+    let settleRun!: () => void;
+    const run = new Promise<void>((resolve) => {
+      settleRun = resolve;
+    });
+    currentRun = run;
+    void (async () => {
       try {
         let rounds = 0;
         let roundReason = reason;
@@ -505,10 +525,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         }
       } finally {
         currentRun = null;
+        settleRun();
       }
     })();
-    currentRun = chain;
-    return chain;
+    return run;
   }
 
   function start(): Promise<void> {
@@ -527,12 +547,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     return requestSync("bootstrap");
   }
 
-  function stop(): void {
+  function stop(): Promise<void> {
     const wasLive = status() === "syncing" || status() === "waking";
     halt();
     if (wasLive) {
       setStatus("idle");
     }
+    // Resolve only after the in-flight run has settled: halt bumped the
+    // epoch, so the run stops between its next units of work and its
+    // promise clears currentRun in its finally. A caller can then wipe
+    // without a run writing after it.
+    const run = currentRun;
+    return run === null ? Promise.resolve() : run.then(() => undefined);
   }
 
   return {

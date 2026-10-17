@@ -538,3 +538,91 @@ observability, not history (accepted: LWW means a dropped op is already resolved
 engine's count refresh defers a macrotask past Dexie's write transaction rather than
 joining it (accepted: a 0 ms hop keeps `sync_meta` reads in scope without restructuring
 the hook).
+
+## 2026-10-16 - Tier 1: Shared-device ownership classification and always-remove sign-out [LOCKED]
+
+**Status: LOCKED. Extends the 2026-10-16 bucket 3 client sync ADR (adoption) with a
+device-ownership guard and a mandatory local wipe on sign-out.**
+
+**Context**: A device can be shared or handed down, so the log in IndexedDB may belong to
+a different account than the one signing in now. Bucket 3's adoption rewrote ownership
+unconditionally, so signing in on a device that held another account's log would rebase
+that log onto the new account and push it. The sign-out path also left the local copy in
+place, so a handed-down device kept the previous account's rows.
+
+**Decision**:
+- `apps/web/src/lib/sync/ownership.ts` is the single source of truth for ownership.
+  `OWNERSHIP_SOURCES` names every owner-bearing field (the four synced row owner columns,
+  the outbox payload owner fields, the `adopted_user_id` marker, and `local_profile.id`)
+  so a new store cannot be silently forgotten. `classifyOwnership(db, userId)` returns
+  "fresh" (no owner stamps, no marker), "mine" (the marker names the user, or every stamp
+  is the account itself or the device's own unadopted `local_profile.id`), or "foreign"
+  (some stamp names another account, listing the distinct non-matching ids).
+- `adoptLocalUser` runs `classifyOwnership` as the first step of its transaction and
+  throws `ForeignOwnerError` (a `LocalValidationError`) before touching a row when the
+  verdict is "foreign". The "mine" and "fresh" paths are unchanged.
+- `evaluateAuth` classifies ownership; a foreign device binds no repos and starts no
+  engine, and the Account screen shows a foreign panel with export, remove, and sign out.
+  The "Upload my existing local data" action never renders there. A failed ownership read
+  fails closed to an "unknown" state: the engine stops and nothing binds, so a device of
+  unknown ownership never syncs.
+- Sign-out ALWAYS removes the account's synced copy from the device. `account.logout`
+  awaits `engine.stop()` (so no in-flight run can write afterward), the server logout runs
+  best-effort, then `wipeAccountDataFromDevice(db, userId)` deletes the account's rows,
+  their children, and its outbox ops (including child ops scoped through a deleted parent),
+  in ONE rw transaction of direct deletes that queue no ops. Device-local scratch (the
+  adoption marker, every pull cursor, the conflict log, drafts, and the sync stamps) is
+  cleared only when the device actually belongs to `userId` (the marker names it, or no
+  marker exists and no foreign rows do), so a foreign panel's sign-out leaves the foreign
+  log classifiable for the next sign-in. `local_profile` (display name, units) and the
+  `api_base_url` override always stay, so a returning user does not re-onboard. The wipe
+  runs before the auth state flips, and a server failure never blocks it.
+
+**Rationale**: Ownership is already in the schema; naming every source and classifying
+against it turns "whose log is this" into one tested question instead of scattered
+assumptions. Refusing foreign adoption avoids the worst outcome, silently publishing one
+account's training log under another. Removing the local copy on sign-out is the honest
+default for shared hardware and removes the keep/prompt decision the owner rejected.
+
+**Trade-offs**: A device-local profile id is trusted as "this device's own" only while no
+adoption marker exists; after sign-out the kept profile id no longer identifies an
+account, which is harmless because its rows were wiped. The wipe is destructive and
+irreversible on the device (accepted: the server copy is the system of record, and the
+foreign panel offers export first). A failed wipe keeps the session signed-in and
+surfaces the error rather than silently signing out. The outbox wipe also drops child ops
+whose payload has no owner column but whose parent was deleted, which is more than the
+owner-column rule alone and keeps the queue free of ops that would reference gone rows.
+
+## 2026-10-16 - Tier 1: Pull cursor as an optimization behind a full re-pull safety net [LOCKED]
+
+**Status: LOCKED. Extends the 2026-10-16 bucket 3 client sync ADR (per-entity cursors).**
+
+**Context**: Pull resumes each entity from a stored `pull_cursor:{entity}`. A row whose
+server-stamped cursor is at or before a stored cursor is never revisited, so a cursor that
+survives a server-side reset, a clock step, or a re-minted id could in principle hide a
+row permanently. The cursor was the only pull state, with no periodic ground truth.
+
+**Decision**:
+- `sync_meta.last_full_pull_at` records the last completed full re-pull.
+  `dueForFullRepull(lastFullPullAt, now, intervalMs = FULL_REPULL_INTERVAL_MS)` is pure
+  and testable and reports due when the stamp is absent, unparseable, or older than the
+  interval (default 12 hours).
+- When due and not already pending, `pullAll` sets a `full_pull_pending` flag and runs the
+  normal parents-first walk starting each entity from a null cursor, WITHOUT deleting the
+  stored cursors (they are still written per page). While the flag is set, a run resumes
+  incrementally from those cursors, so an interrupted full attempt makes progress instead
+  of re-downloading everything on every retry. A run that reaches `complete: true` stamps
+  `last_full_pull_at` and clears the flag. When not due, behavior is exactly as before.
+- The cursor is documented as an optimization behind this safety net; the residual window
+  inside a run is one apply transaction, because each page's merges and its cursor move
+  together.
+
+**Rationale**: A periodic full walk bounds any cursor-drift error to at most one interval
+without giving up the cursor's saving on every other run. Clearing cursors and walking
+parents-first reuses the existing idempotent merge (a tie keeps the local row), so the
+safety net needs no new merge logic.
+
+**Trade-offs**: A due run re-downloads every entity's full page set (accepted: 12 hours
+stale at friend scale, and merges are idempotent). An aborted due run leaves the pending
+flag set and the stored cursors in place, so the next run degrades to an incremental
+resume and eventually completes rather than storming the full walk on every attempt.

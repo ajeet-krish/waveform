@@ -22,6 +22,23 @@ export function pullCursorKey(entity: SyncEntity): string {
 /** ISO stamp of the last pull that reached every entity's tip. */
 export const LAST_SYNCED_AT_KEY = "last_synced_at";
 
+/**
+ * ISO stamp of the last completed full re-pull (a run that walked every
+ * entity from the beginning). The pull cursor is an optimization behind
+ * this safety net: when the stamp is older than `FULL_REPULL_INTERVAL_MS`,
+ * the next pull starts a full walk.
+ */
+export const LAST_FULL_PULL_AT_KEY = "last_full_pull_at";
+
+/**
+ * True while a due full re-pull has been started but not yet completed.
+ * The walk runs from a null cursor per entity without deleting the
+ * stored cursors, so an interrupted attempt degrades to an incremental
+ * resume on the next run instead of re-downloading everything again.
+ * Cleared, together with `last_full_pull_at`, by a complete run.
+ */
+export const FULL_PULL_PENDING_KEY = "full_pull_pending";
+
 /** The user id whose rows this device now belongs to (adoption). */
 export const ADOPTED_USER_ID_KEY = "adopted_user_id";
 
@@ -38,6 +55,15 @@ export const CONFLICT_LOG_KEY = "conflict_log";
 export async function getMeta(db: WaveformDb, key: string): Promise<unknown> {
   const row = await db.sync_meta.get(key);
   return row?.value;
+}
+
+/**
+ * Reads the last completed full re-pull stamp; null when it was never
+ * written or is not a non-empty string.
+ */
+export async function getLastFullPullAt(db: WaveformDb): Promise<string | null> {
+  const value = await getMeta(db, LAST_FULL_PULL_AT_KEY);
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 /** Writes one sync_meta value (put, so it is idempotent). */

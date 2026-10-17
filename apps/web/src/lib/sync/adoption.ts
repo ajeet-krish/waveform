@@ -24,6 +24,7 @@
 import type { WaveformDb } from "../../db/schema";
 import type { OutboxRowMap } from "../../db/types";
 import { ADOPTED_USER_ID_KEY, PULL_CURSOR_PREFIX, getMeta, setMeta } from "./meta";
+import { ForeignOwnerError, classifyOwnership } from "./ownership";
 
 /** What one adoption run did. */
 export type AdoptionSummary = {
@@ -92,6 +93,12 @@ async function rewriteProfile(db: WaveformDb, userId: string): Promise<boolean> 
  * device is already adopted for this user it touches nothing and
  * reports adopted false. Writes NO new outbox ops (ownership is
  * bookkeeping, not a user edit).
+ *
+ * Refuses outright when the device holds another account's log: the
+ * first thing the transaction does is classifyOwnership, and a "foreign"
+ * verdict throws ForeignOwnerError before any row is modified. An
+ * unadopted device's own pre-account log classifies as "mine", so the
+ * normal upload path is unchanged.
  */
 export async function adoptLocalUser(db: WaveformDb, userId: string): Promise<AdoptionSummary> {
   return db.transaction(
@@ -108,6 +115,13 @@ export async function adoptLocalUser(db: WaveformDb, userId: string): Promise<Ad
       db.sync_meta,
     ],
     async () => {
+      // Hard guard before any modification: this device may not adopt a
+      // log that belongs to someone else.
+      const ownership = await classifyOwnership(db, userId);
+      if (ownership.kind === "foreign") {
+        throw new ForeignOwnerError(ownership.ownerIds);
+      }
+
       if ((await getMeta(db, ADOPTED_USER_ID_KEY)) === userId) {
         return {
           adopted: false,
