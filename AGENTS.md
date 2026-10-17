@@ -1,7 +1,8 @@
 # Waveform Platform
 
-Offline-first lifting, cycling, and climbing tracker for a small friend group. Rust
-(Axum + SQLx) API on Postgres, SolidJS + Vite PWA frontend, in a pnpm + Turbo (JS)
+Comprehensive fitness tracker for strength training plus running, cycling, climbing,
+hiking, and swimming, with a consistency grid and crew leaderboards. Rust
+(Axum + SQLx) API on Postgres, SolidJS + Vite frontend, in a pnpm + Turbo (JS)
 and Cargo (Rust) monorepo. Weights in kg, lengths in cm, Brzycki e1RM.
 
 ## Quick Commands
@@ -44,7 +45,7 @@ Local infra:
 ## Project Map
 
 - `apps/api` - Axum library plus thin binary: auth routes (signup, login, logout, me), extractors, rate limiter, config, state.
-- `apps/web` - SolidJS + Vite PWA: routes, the IndexedDB data core (`src/db`), and `src/lib` modules. Phase 1 done.
+- `apps/web` - SolidJS + Vite: routes, the IndexedDB data core (`src/db`), and `src/lib` modules. Phase 1 done.
 - `crates/db` - SQLx pool, migration runner, row models (ts-rs), queries.
 - `crates/scoring` - Brzycki e1RM, Effort Points, V-points (pure, unit-tested).
 - `crates/analytics` - aggregation metrics ported from fitness_control_center.

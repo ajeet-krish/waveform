@@ -1,4 +1,4 @@
-# Waveform: Offline-first training tracker for lifting, climbing, and cycling
+# Waveform: the complete training tracker for lifting, running, climbing, and more
 
 [![Live on GitHub Pages](https://img.shields.io/badge/Live-GitHub%20Pages-2ea44f.svg)](https://ajeet-krish.github.io/waveform/)
 [![SolidJS](https://img.shields.io/badge/SolidJS-1.9-2c4f7c.svg?logo=solid&logoColor=white)](https://www.solidjs.com/)
@@ -6,7 +6,9 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Waveform is a training log for lifting, climbing, and cycling that runs entirely in your browser. Every workout, climb, ride, and body reading is stored on your own device in IndexedDB, so the app opens quickly, keeps working without a network, and leaves your numbers under your control. You can install it on your phone as a PWA and it behaves like a native app, with no account and no sign-in.
+Waveform is a workout tracker for strength training that grew into a full fitness companion. Log every set with a live e1RM, track your runs, rides, climbs, hikes, and swims in one history, keep a year-long consistency grid going, and take it to the boards against your crew. Built for people who lift and also run, ride, climb, or swim, and who want their training to be social without giving up a real logbook.
+
+Track your training. Watch it add up. Out-train your friends.
 
 ---
 
@@ -14,114 +16,108 @@ Waveform is a training log for lifting, climbing, and cycling that runs entirely
 
 Waveform is live at https://ajeet-krish.github.io/waveform/.
 
-![Waveform dashboard showing the week at a glance](docs/screenshots/dashboard.png)
-
-*The dashboard gives you the week at a glance: sessions completed, volume lifted, and active days.*
-
 ---
 
-## Key Capabilities
+## Track everything you do
 
-- **Offline-first storage**: every record lives in IndexedDB on your device, so the app loads without a network and keeps working when the connection drops.
-- **Installable PWA**: add Waveform to your home screen, launch it from an icon, and use it offline after the first load.
-- **Workout logging**: add exercises, log each set by weight and reps, and read a live Brzycki e1RM estimate as you type.
-- **Draft sessions that autosave**: a session in progress saves itself, so a reload or a closed tab does not cost you the work.
-- **Monday-start history**: sessions group into weeks that begin on Monday, with a detail view for each session.
-- **Exercise catalog**: over a hundred movements out of the box, and custom exercises you create become part of your catalog.
-- **Climbing with V-points**: record how many problems you sent at each V grade and let Waveform score the session in V-points.
-- **Cycling rides**: capture distance, elevation, and duration in the same history as your lifting and climbing.
-- **Body stats with a weight trend**: track weight, body fat, and tape circumferences, with a trend line so the direction matters more than any single day.
-- **Week-at-a-glance dashboard**: see sessions, volume, and active days for the current week in one place.
+- **Strength training**: log every set by weight and reps and read a live Brzycki e1RM estimate as you type, so the number tells you how strong the set really was.
+- **Five more disciplines**: running, cycling, climbing, hiking, and swimming each get their own screen and land in the same history as your lifting.
+- **Climbing scored the right way**: record how many problems you sent at each V grade. Waveform sums V-points, so a hard send counts for more than a pile of easy ones.
+- **Rides and runs by the numbers**: distance, elevation, duration, and pace, with climbing and distance totals that roll into the boards.
+- **Body stats with a trend**: weight, body fat, and tape circumferences, one reading per day, with a trend line so the direction matters more than any single morning.
+- **A catalog of over a hundred movements**, plus custom exercises you create and keep.
+
+## Log fast, then get out of the gym
+
+- **Routines**: save the exercises, their order, and the targets you aim for. Start one and it seeds a fresh session; nothing is logged until you finish it.
+- **Sessions that autosave**: a workout in progress saves itself, so a reload or a closed tab never costs you the work you just entered.
+- **Live e1RM on every set**: type the weight and reps and the estimate updates as you go.
 - **Editable units**: switch between kg and lb for weight and cm and in for lengths whenever you like.
-- **JSON backup export and import**: export everything as JSON and import it to restore or move your data.
+- **History you can actually read**: sessions grouped into Monday-start weeks, with a detail view for every session and a searchable exercise history for each lift.
+- **JSON backup**: export everything and import it to restore or move your log.
+
+## Show up every day
+
+- **The effort grid**: a GitHub-style calendar of your training year. One square per day, weeks starting Monday, shaded by how hard you went.
+- **Effort Points**: every session scores itself from minutes times intensity, with bonuses for PRs, sends, and elevation, so lifting, riding, and climbing all light up the same grid.
+- **Streaks**: keep the chain alive. The grid makes a rest day a visible choice instead of an accident.
+
+## Compete with your crew
+
+- **Leaderboards across every discipline**: consistency, lifting, cycling, and climbing boards that rank your group over 7 days, 4 weeks, or 12 weeks.
+- **Consistency board**: active days and weekly streaks, so showing up counts as much as lifting heavy.
+- **Lifting boards**: total volume, best e1RM for your marquee lifts, and relative strength (e1RM divided by bodyweight) so a lighter lifter gets their due.
+- **Cycling and climbing boards**: distance, elevation, V-points, and hardest send.
+- **Kudos and the group feed**: cheer a friend's session with one tap. A session can collect one kudos from each member of the group. The feed is rolling out now.
+- **Your crew, not the world**: boards compare the people you train with, and your body stats stay private to you.
 
 ---
 
 ## Application Walkthrough
 
-Screenshots below are placeholders, to be captured from the live app.
-
 ### Dashboard
 
-The dashboard opens on the current week, with session count, total volume lifted, and active days so you can see how the week is going before you dig into any single session.
-
-![Dashboard screen with the week at a glance](docs/screenshots/dashboard.png)
-
-*The dashboard sums up the week: sessions, volume lifted, and active days.*
+Open on the current week: sessions completed, volume lifted, and active days, next to your effort grid, your crew's latest sessions, and the boards.
 
 ### Workout
 
-Start a session, add exercises from the catalog or create your own, and log every set by weight and reps. As you type, Waveform shows a live e1RM estimate labeled as Brzycki, so you can see the strength behind the numbers. A session in progress saves itself as a draft, and when you are done you finish it or discard it.
+Start a session, add exercises from the catalog or create your own, and log each set by weight and reps. The live e1RM estimate, labeled as Brzycki, updates as you type. Finish the session when you are done, or discard it if it was a mistake.
 
-![Workout screen with exercises and sets](docs/screenshots/workout.png)
+### Routines
 
-*Logging a workout, with the exercise list, the sets entered so far, and the live e1RM reading.*
+Save a plan, then start it to seed a session in the right order with your targets in place. Starting a routine copies it into a draft, and nothing is logged until you finish.
 
-### History
+### Activities
 
-History is grouped into Monday-start weeks, with a day heading for each session. Open any session for the full detail, or delete it behind a confirmation.
-
-![History screen grouped by weeks](docs/screenshots/history.png)
-
-*History is grouped into Monday-start weeks, with a detail view for each session.*
-
-### Exercises
-
-Browse the catalog of over a hundred movements, covering the usual lifts plus plenty of variations. Search by name, open an exercise to see its history, and add a custom movement when something is missing.
-
-![Exercises screen showing the catalog](docs/screenshots/exercises.png)
-
-*The exercise catalog, plus any custom movements you have added.*
+Cycling, running, climbing, hiking, and swimming each have a screen. Log a ride with distance, elevation, and duration; a run or swim with distance, duration, and pace; a hike with distance, elevation, and time on foot. Climbing records the grades you sent.
 
 ### Climbing
 
-Log a climbing session by picking a date and recording how many problems you sent at each V grade. Waveform turns those sends into V-points, a simple score that rewards harder grades, so a good session adds up to something you can compare over time.
+Pick the date, set how many problems you sent at each V grade, and watch the V-points total update. The hardest grade you sent comes along for the boards.
 
-![Climbing screen with V grade counts](docs/screenshots/climbing.png)
+### Consistency grid
 
-*Climbing sessions count sends per V grade and total the V-points.*
+Your training year as a calendar of squares. Days shade darker as your Effort Points climb, across lifting, riding, running, climbing, hiking, and swimming alike. Scroll back through the weeks and watch the streak build.
 
-### Cycling
+### Leaderboards
 
-Record a ride with distance, elevation, and duration. It is a plain, honest ride log that sits alongside your lifting and climbing in the same history.
-
-![Cycling screen with a ride entry](docs/screenshots/cycling.png)
-
-*A cycling ride, captured with distance, elevation, and duration.*
+Pick a window: 7 days, 4 weeks, or 12 weeks. Boards rank your crew on consistency, lifting volume, best e1RM per marquee lift, relative strength, cycling distance, and climbing. Ties share a rank.
 
 ### Body
 
-Track weight, body fat, and tape circumferences such as arms, chest, and waist. You keep one reading per day, and Waveform draws a weight trend so the direction matters more than any single day.
+One reading per day for weight and body fat, plus tape circumferences such as arms, chest, and waist. A weight trend draws over time. These numbers stay on your side: they never appear on boards, feeds, or challenges.
 
-![Body screen showing stats and weight trend](docs/screenshots/body.png)
+### Account
 
-*Body stats with one reading per day and a weight trend over time.*
+Sign up with an email and password, and your log syncs across your devices. The account screen shows sync status and lets you point the app at your own server.
 
-### Profile and backup
+### Backup
 
-Set your display name and choose kg or lb for weight and cm or in for lengths. Your data never leaves the device on its own, so Waveform also gives you a JSON backup you can export and later import to bring everything back.
-
-![Profile and settings screen](docs/screenshots/profile.png)
-
-*Settings for your name, units, and the JSON backup tools.*
+Export your whole log as JSON and import it later to restore, or to move to another account. Merge adds to what is there; replace starts fresh behind a typed confirmation.
 
 ---
 
 ## Step by step
 
-### First run
+### Get started
 
-1. Open https://ajeet-krish.github.io/waveform/ in a browser.
-2. Go to settings and set your display name.
+1. Open https://ajeet-krish.github.io/waveform/.
+2. Sign up under Account with an email and password.
 3. Choose your units: kg or lb for weight, cm or in for lengths.
 
 ### Log a workout
 
-1. Start a new session.
+1. Start a new session, or start a routine.
 2. Add exercises from the catalog, or create a custom one.
 3. Enter each set as weight and reps.
 4. Read the live e1RM, labeled as Brzycki, as you go.
 5. Finish the session, or discard it if it was a mistake.
+
+### Log a ride, run, swim, or hike
+
+1. Open the activity's screen.
+2. Enter distance, duration, and elevation where they apply.
+3. Save it. It lands in your history and counts toward the grid and the boards.
 
 ### Log a climb
 
@@ -130,26 +126,18 @@ Set your display name and choose kg or lb for weight and cm or in for lengths. Y
 3. Watch the V-points total update.
 4. Save the session.
 
-### Log a ride
+### Keep the streak alive
 
-1. Enter the distance.
-2. Add the elevation.
-3. Record the duration.
-4. Save the ride.
+1. Open the consistency grid.
+2. Find today's square and the weeks behind it.
+3. Train, and watch today light up.
 
-### Log a body reading
+### Compete
 
-1. Enter your weight.
-2. Add body fat if you have it.
-3. Fill in any tape circumferences you measured.
-4. Save it. You keep one reading per day, and the weight trend updates.
-
-### Review your history
-
-1. Open history, grouped into Monday-start weeks.
-2. Use the day headings to find a session.
-3. Open a session for the full detail.
-4. Delete it if you need to, with a confirmation first.
+1. Sign in and open the boards.
+2. Pick a window.
+3. Compare your consistency, lifting, riding, and climbing against your crew.
+4. Tap kudos on a session you liked.
 
 ### Protect your data
 
@@ -158,12 +146,6 @@ Set your display name and choose kg or lb for weight and cm or in for lengths. Y
 3. Import it on another device to restore everything.
 4. Choose merge to add data, or replace behind a typed confirmation.
 
-### Install on your phone
-
-1. Open the site in your phone browser.
-2. Use Add to Home Screen.
-3. Launch it from the icon. It works offline after the first load.
-
 ---
 
 ## Architecture
@@ -171,16 +153,17 @@ Set your display name and choose kg or lb for weight and cm or in for lengths. Y
 ```
 waveform/
   apps/
-    api/                  # Rust Axum API (planned): routers, extractors, handlers, config
-    web/                  # SolidJS + Vite PWA, the shipped app
-      public/             # PWA icons and favicon
+    api/                  # Rust Axum API: auth, sync, social boards, handlers, config
+    web/                  # SolidJS + Vite frontend, the shipped app
+      public/             # icons and favicon
       src/
-        components/       # shell, panels, forms, charts, activity and body widgets
+        components/       # shell, panels, forms, charts, activity, body, routine, social, sync
         db/               # IndexedDB core: Dexie schema, repos, outbox, seed
-          repos/          # workouts, exercises, activities, body, drafts, profile
+          repos/          # workouts, exercises, activities, body, drafts, profile, routines
           seed/           # exercise catalog seed and UUIDv5 helpers
-        lib/              # view models and helpers: week stats, history, backup, import
-        routes/           # Dashboard, Workout, History, Exercises, Climbing, Cycling, Body, Profile
+        lib/              # view models and helpers: week stats, history, social, heat, backup
+        routes/           # Dashboard, Workout, History, Exercises, Routines, Activities,
+                          # Climbing, Cycling, Running, Hikes, Swims, Body, Social, Account
         styles/           # design tokens and app CSS
   crates/
     analytics/            # aggregation metrics
@@ -191,7 +174,7 @@ waveform/
     api-types/            # TypeScript types generated from Rust
     scoring/              # TypeScript scoring plus the shared golden vectors
   migrations/             # SQLx SQL: init, catalog seed, hardening, catalog cleanup and dedup
-  infra/                  # docker-compose (Postgres + Mailpit), railway.toml
+  infra/                  # docker-compose (Postgres + Mailpit)
   docs/                   # architecture, decisions, research, reviews, tests
 ```
 
@@ -201,13 +184,13 @@ waveform/
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | SolidJS + Vite PWA |
+| **Frontend** | SolidJS + Vite |
 | **Language** | TypeScript 5.9 |
-| **Data** | IndexedDB via Dexie |
-| **Backend (planned)** | Rust with Axum, SQLx, Postgres |
+| **Data** | IndexedDB via Dexie, synced to Postgres |
+| **Backend** | Rust with Axum, SQLx, Postgres |
 | **Build** | pnpm + Turborepo (JS), Cargo (Rust) |
 | **Testing** | Vitest (web and scoring), cargo test (Rust) |
-| **Hosting** | GitHub Pages |
+| **Hosting** | GitHub Pages (web), Render (API) |
 
 ---
 
@@ -234,9 +217,9 @@ See [AGENTS.md](AGENTS.md) for the full command list and project conventions, an
 
 | Suite | Files | Tests | Notes |
 |-------|-------|-------|-------|
-| Web (`apps/web`) | 35 | 330 | Vitest over the IndexedDB core and the lib view models |
-| Scoring (`packages/scoring`) | 4 | 42 | Brzycki, climbing, effort, and the golden fence |
-| Rust workspace | 4 crates | 84 | Unit and integration tests across the crates |
+| Web (`apps/web`) | 51 | 598 | Vitest over the IndexedDB core, the lib view models, and the social boards |
+| Scoring (`packages/scoring`) | 4 | 43 | Brzycki, climbing, effort, and the golden fence |
+| Rust workspace | 4 crates | 209 | Unit and integration tests across auth, sync, social, and the crates |
 
 The scoring golden fence spans both languages. `packages/scoring/golden/scoring.golden.json` is replayed by the TypeScript suite and by `crates/scoring/tests/golden.rs`, so flipping one vector fails both and the two implementations cannot silently diverge.
 
@@ -244,9 +227,9 @@ The scoring golden fence spans both languages. `packages/scoring/golden/scoring.
 
 ## Good to know
 
-- Your data lives on this device. Export a backup after big weeks so nothing is ever only in one place.
-- There is no account yet, which is also why the app needs no sign-in.
-- Later phases add accounts, cross-device sync, and the group features such as leaderboards, a heatmap, and a feed.
+- Your log syncs to your account and follows you across devices, and you can always export a JSON backup.
+- Boards compare your group, not strangers. Body stats stay private and never appear on boards, feeds, or challenges.
+- Kudos and the group feed are rolling out now; the boards and the grid are live.
 
 ---
 
