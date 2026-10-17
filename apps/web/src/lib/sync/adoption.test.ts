@@ -4,6 +4,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -139,6 +141,27 @@ async function seed(db: WaveformDb): Promise<void> {
     updated_at: STAMP,
     deleted_at: null,
   };
+  const routineRow: LocalRow<Routine> = {
+    id: "routine-1",
+    user_id: OLD_ID,
+    name: "Push Day",
+    notes: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  };
+  const routineEntry: LocalRow<RoutineEntry> = {
+    id: "routine-entry-1",
+    routine_id: "routine-1",
+    exercise_id: "custom-1",
+    order_index: 0,
+    target_sets: 3,
+    target_reps: 8,
+    target_weight_kg: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  };
 
   await db.exercises.bulkAdd(exercises);
   await db.workout_sessions.add(session);
@@ -146,6 +169,8 @@ async function seed(db: WaveformDb): Promise<void> {
   await db.set_entries.add(setRow);
   await db.activities.add(activity);
   await db.body_stats.add(body);
+  await db.routines.add(routineRow);
+  await db.routine_entries.add(routineEntry);
 
   const sessionOp: OutboxOp<"workout_sessions"> = {
     op_id: "op-session",
@@ -163,7 +188,15 @@ async function seed(db: WaveformDb): Promise<void> {
     updated_at: STAMP,
     created_at: STAMP,
   };
-  await db.outbox.bulkAdd([sessionOp, exerciseOp]);
+  const routineOp: OutboxOp<"routines"> = {
+    op_id: "op-routine",
+    entity: "routines",
+    action: "update",
+    payload: routineRow,
+    updated_at: STAMP,
+    created_at: STAMP,
+  };
+  await db.outbox.bulkAdd([sessionOp, exerciseOp, routineOp]);
 
   await db.local_profile.put(profile(OLD_ID));
   const sends: ClimbSends = {
@@ -209,8 +242,8 @@ describe("adoptLocalUser", () => {
     const summary = await adoptLocalUser(db, NEW_ID);
     expect(summary).toEqual({
       adopted: true,
-      rowsRewritten: 4,
-      opsRewritten: 2,
+      rowsRewritten: 5,
+      opsRewritten: 3,
       profileRewritten: true,
     });
 
@@ -222,15 +255,19 @@ describe("adoptLocalUser", () => {
     expect((await db.workout_sessions.get("session-1"))?.user_id).toBe(NEW_ID);
     expect((await db.activities.get("activity-1"))?.user_id).toBe(NEW_ID);
     expect((await db.body_stats.get("body-1"))?.user_id).toBe(NEW_ID);
+    expect((await db.routines.get("routine-1"))?.user_id).toBe(NEW_ID);
     // The child rows still exist and still hang off their parents.
     expect((await db.exercise_entries.get("entry-1"))?.workout_id).toBe("session-1");
     expect((await db.set_entries.get("set-1"))?.exercise_entry_id).toBe("entry-1");
+    expect((await db.routine_entries.get("routine-entry-1"))?.routine_id).toBe("routine-1");
 
     // The queued ops carry the new ids in their payloads, op ids intact.
     const sessionOp = await db.outbox.get("op-session");
     expect((sessionOp?.payload as { user_id: string }).user_id).toBe(NEW_ID);
     const exerciseOp = await db.outbox.get("op-exercise");
     expect((exerciseOp?.payload as { owner_id: string }).owner_id).toBe(NEW_ID);
+    const routineOp = await db.outbox.get("op-routine");
+    expect((routineOp?.payload as { user_id: string }).user_id).toBe(NEW_ID);
 
     // The profile row is re-keyed, not duplicated.
     expect(await db.local_profile.get(OLD_ID)).toBeUndefined();
@@ -302,8 +339,8 @@ describe("adoptStartEmpty", () => {
     await seed(db);
 
     const summary = await adoptStartEmpty(db, NEW_ID);
-    expect(summary.rowsWiped).toBe(7);
-    expect(summary.opsWiped).toBe(2);
+    expect(summary.rowsWiped).toBe(9);
+    expect(summary.opsWiped).toBe(3);
     expect(summary.sendsWiped).toBe(1);
     expect(summary.cursorsCleared).toBe(2);
     expect(summary.profileRewritten).toBe(true);
@@ -314,6 +351,8 @@ describe("adoptStartEmpty", () => {
     expect(await db.set_entries.count()).toBe(0);
     expect(await db.activities.count()).toBe(0);
     expect(await db.body_stats.count()).toBe(0);
+    expect(await db.routines.count()).toBe(0);
+    expect(await db.routine_entries.count()).toBe(0);
     expect(await db.outbox.count()).toBe(0);
     expect(await db.climb_sends.count()).toBe(0);
 

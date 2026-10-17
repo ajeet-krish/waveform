@@ -5,6 +5,7 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -688,6 +689,18 @@ describe("foreign-owner guards", () => {
     };
   }
 
+  function foreignRoutine(): LocalRow<Routine> {
+    return {
+      id: "routine-other",
+      user_id: "other",
+      name: "Someone Else's Routine",
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+  }
+
   it("refuses to update or delete a custom exercise owned by another account", async () => {
     const { db, repos } = harness("foreign-exercise");
     await db.exercises.put(foreignExercise());
@@ -781,6 +794,19 @@ describe("foreign-owner guards", () => {
     await expect(repos.body.remove("body-other")).rejects.toThrow(LocalValidationError);
 
     expect(await db.body_stats.get("body-other")).toEqual(foreignBody());
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("refuses to update or delete a routine owned by another account", async () => {
+    const { db, repos } = harness("foreign-routine");
+    await db.routines.put(foreignRoutine());
+
+    await expect(repos.routines.update("routine-other", { name: "Hijacked" })).rejects.toThrow(
+      LocalValidationError,
+    );
+    await expect(repos.routines.softDelete("routine-other")).rejects.toThrow(LocalValidationError);
+
+    expect(await db.routines.get("routine-other")).toEqual(foreignRoutine());
     expect(await db.outbox.count()).toBe(0);
   });
 

@@ -5,8 +5,9 @@
  * device holds, deletions included, so a restore sees the same truth the
  * sync outbox would push. Version 2 covers phase 1 and phase 2 entities
  * (profile, the three workout tables, the catalog, activities, body
- * stats, and the device-local climb_sends histogram); the schema_version
- * lets a future importer tell v1 from v2 from whatever comes next.
+ * stats, routines and their entries, and the device-local climb_sends
+ * histogram); the schema_version lets a future importer tell v1 from v2
+ * from whatever comes next.
  */
 
 import type {
@@ -14,6 +15,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -37,6 +40,13 @@ export type WaveformBackupV2 = {
   activities: LocalRow<Activity>[];
   body_stats: LocalRow<BodyStats>[];
   climb_sends: ClimbSends[];
+  /**
+   * Routines and their entries are additive v2 fields: a backup written
+   * before Phase 2.1 omits them and parses as empty. Export always writes
+   * both arrays.
+   */
+  routines?: LocalRow<Routine>[];
+  routine_entries?: LocalRow<RoutineEntry>[];
 };
 
 /** Reads every phase 1 and phase 2 store as it stands, tombstones and all. */
@@ -55,6 +65,8 @@ export async function collectBackup(db: WaveformDb): Promise<WaveformBackupV2> {
     activities: await db.activities.toArray(),
     body_stats: await db.body_stats.toArray(),
     climb_sends: await db.climb_sends.toArray(),
+    routines: await db.routines.toArray(),
+    routine_entries: await db.routine_entries.toArray(),
   };
 }
 

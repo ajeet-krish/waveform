@@ -73,6 +73,11 @@ export const OWNERSHIP_SOURCES: readonly OwnershipSource[] = [
     meaning: "body stat owner",
   },
   {
+    path: "routines.user_id",
+    kind: "row-owner",
+    meaning: "routine owner (routine_entries scope through it)",
+  },
+  {
     path: "outbox.payload.owner_id",
     kind: "outbox-payload",
     meaning: "owner inside a queued custom-exercise op",
@@ -80,7 +85,7 @@ export const OWNERSHIP_SOURCES: readonly OwnershipSource[] = [
   {
     path: "outbox.payload.user_id",
     kind: "outbox-payload",
-    meaning: "owner inside a queued session, activity, or body-stat op",
+    meaning: "owner inside a queued session, activity, body-stat, or routine op",
   },
   {
     path: "sync_meta.adopted_user_id",
@@ -174,6 +179,9 @@ async function collectOwnerStamps(db: WaveformDb): Promise<OwnerStamps> {
   for (const row of await db.body_stats.toArray()) {
     addStamp(stamps, row.user_id, "body_stats.user_id");
   }
+  for (const row of await db.routines.toArray()) {
+    addStamp(stamps, row.user_id, "routines.user_id");
+  }
   for (const op of await db.outbox.toArray()) {
     addStamp(
       stamps,
@@ -262,7 +270,8 @@ async function deviceOwnedByUser(db: WaveformDb, userId: string): Promise<boolea
  * Deleted: custom exercises owned by `userId`; `workout_sessions` owned
  * by `userId` plus their `exercise_entries` and `set_entries`;
  * `activities` owned by `userId` plus their `climb_sends`; `body_stats`
- * owned by `userId`; and queued outbox ops whose payload owner is
+ * owned by `userId`; `routines` owned by `userId` plus their
+ * `routine_entries`; and queued outbox ops whose payload owner is
  * `userId` (and child ops scoped through a deleted parent).
  *
  * Device-local scratch is cleared ONLY when the device actually belongs
@@ -291,6 +300,8 @@ export async function wipeAccountDataFromDevice(
       db.set_entries,
       db.activities,
       db.body_stats,
+      db.routines,
+      db.routine_entries,
       db.outbox,
       db.climb_sends,
       db.workout_drafts,
@@ -343,6 +354,16 @@ export async function wipeAccountDataFromDevice(
         .toArray()).map((row) => row.id);
       await db.body_stats.bulkDelete(bodyIds);
 
+      // Routines plus their entries, scoped through the parent routine.
+      const routineIds = (await db.routines
+        .filter((row) => row.user_id === userId)
+        .toArray()).map((row) => row.id);
+      const routineIdSet = new Set(routineIds);
+      if (routineIds.length > 0) {
+        await db.routine_entries.where("routine_id").anyOf(routineIds).delete();
+        await db.routines.bulkDelete(routineIds);
+      }
+
       // Queued ops that belong to the user, whether by an owner stamp in
       // the payload or by carrying a child row whose parent was deleted.
       const opIds: string[] = [];
@@ -351,7 +372,11 @@ export async function wipeAccountDataFromDevice(
           opIds.push(op.op_id);
           continue;
         }
-        const payload = op.payload as { workout_id?: unknown; exercise_entry_id?: unknown };
+        const payload = op.payload as {
+          workout_id?: unknown;
+          exercise_entry_id?: unknown;
+          routine_id?: unknown;
+        };
         if (
           op.entity === "exercise_entries" &&
           typeof payload.workout_id === "string" &&
@@ -364,6 +389,14 @@ export async function wipeAccountDataFromDevice(
           op.entity === "set_entries" &&
           typeof payload.exercise_entry_id === "string" &&
           entryIdSet.has(payload.exercise_entry_id)
+        ) {
+          opIds.push(op.op_id);
+          continue;
+        }
+        if (
+          op.entity === "routine_entries" &&
+          typeof payload.routine_id === "string" &&
+          routineIdSet.has(payload.routine_id)
         ) {
           opIds.push(op.op_id);
         }

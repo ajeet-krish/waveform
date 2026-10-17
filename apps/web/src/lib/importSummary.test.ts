@@ -17,6 +17,8 @@ function backupOf(counts: {
   set_entries?: number;
   activities?: number;
   body_stats?: number;
+  routines?: number;
+  routine_entries?: number;
   climb_sends?: number;
 }): WaveformBackupV2 {
   return {
@@ -31,6 +33,8 @@ function backupOf(counts: {
     set_entries: rows(counts.set_entries ?? 0),
     activities: rows(counts.activities ?? 0),
     body_stats: rows(counts.body_stats ?? 0),
+    routines: rows(counts.routines ?? 0),
+    routine_entries: rows(counts.routine_entries ?? 0),
     climb_sends: rows(counts.climb_sends ?? 0),
   };
 }
@@ -48,6 +52,8 @@ function summaryOf(
       set_entries: 0,
       activities: 0,
       body_stats: 0,
+      routines: 0,
+      routine_entries: 0,
       climb_sends: 0,
       ...stores,
     },

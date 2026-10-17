@@ -11,6 +11,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -36,7 +38,9 @@ export type OutboxEntity =
   | "exercise_entries"
   | "set_entries"
   | "activities"
-  | "body_stats";
+  | "body_stats"
+  | "routines"
+  | "routine_entries";
 
 /** Maps each syncable entity to the local row type it carries. */
 export type OutboxRowMap = {
@@ -46,6 +50,8 @@ export type OutboxRowMap = {
   set_entries: SetEntryWrite;
   activities: LocalRow<Activity>;
   body_stats: LocalRow<BodyStats>;
+  routines: LocalRow<Routine>;
+  routine_entries: LocalRow<RoutineEntry>;
 };
 
 /**

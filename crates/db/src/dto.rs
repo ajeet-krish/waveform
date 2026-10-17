@@ -296,6 +296,39 @@ impl Default for BodyRules {
     }
 }
 
+/// `routine_entries` target bounds, mirroring `ROUTINE_RULES` in
+/// `apps/web/src/db/validation.ts`. `target_sets` and `target_reps` carry
+/// no SQL CHECK of their own, so these bounds are the shared contract the
+/// client form and repo guards enforce; `target_weight_kg` mirrors the
+/// `routine_entries_target_weight_kg_range` CHECK (null or strictly
+/// positive and at most 1500).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "generated.ts")]
+pub struct RoutineRules {
+    pub target_sets_min: i32,
+    pub target_sets_max: i32,
+    pub target_reps_min: i32,
+    pub target_reps_max: i32,
+    /// Strict lower bound: 0 kg is not a plausible target, so the SQL
+    /// CHECK is `target_weight_kg > 0`.
+    pub target_weight_min_kg_exclusive: i32,
+    pub target_weight_max_kg: i32,
+}
+
+impl Default for RoutineRules {
+    fn default() -> Self {
+        Self {
+            target_sets_min: 1,
+            target_sets_max: 20,
+            target_reps_min: 1,
+            target_reps_max: 36,
+            target_weight_min_kg_exclusive: 0,
+            target_weight_max_kg: 1500,
+        }
+    }
+}
+
 /// Server sync limits agreed with the client: batch cap, pull page size,
 /// and the client clock skew tolerance used by
 /// `waveform_sync::clamp_client_timestamp`.
@@ -348,6 +381,7 @@ pub struct RuleConstants {
     pub set: SetRules,
     pub activity: ActivityRules,
     pub body: BodyRules,
+    pub routine: RoutineRules,
     pub sync: SyncLimits,
     pub password: PasswordRules,
 }
@@ -396,6 +430,22 @@ mod tests {
                 rules.body.bodyfat_max_pct,
             ),
             (0, 1500, 0, 100),
+        );
+        assert_eq!(
+            (
+                rules.routine.target_sets_min,
+                rules.routine.target_sets_max,
+                rules.routine.target_reps_min,
+                rules.routine.target_reps_max,
+            ),
+            (1, 20, 1, 36),
+        );
+        assert_eq!(
+            (
+                rules.routine.target_weight_min_kg_exclusive,
+                rules.routine.target_weight_max_kg,
+            ),
+            (0, 1500),
         );
         assert_eq!(
             (rules.sync.max_ops_per_push, rules.sync.pull_page_size),

@@ -4,6 +4,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -164,6 +166,33 @@ function bodyStat(id: string, user_id: string): LocalRow<BodyStats> {
   };
 }
 
+function routine(id: string, user_id: string): LocalRow<Routine> {
+  return {
+    id,
+    user_id,
+    name: "Push Day",
+    notes: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  };
+}
+
+function routineEntry(id: string, routine_id: string): LocalRow<RoutineEntry> {
+  return {
+    id,
+    routine_id,
+    exercise_id: "catalog-1",
+    order_index: 0,
+    target_sets: 3,
+    target_reps: 8,
+    target_weight_kg: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  };
+}
+
 function sends(activity_id: string): ClimbSends {
   return { activity_id, counts: Array.from({ length: 17 }, () => 0), updated_at: STAMP };
 }
@@ -196,6 +225,7 @@ describe("OWNERSHIP_SOURCES", () => {
       "workout_sessions.user_id",
       "activities.user_id",
       "body_stats.user_id",
+      "routines.user_id",
       "outbox.payload.owner_id",
       "outbox.payload.user_id",
       "sync_meta.adopted_user_id",
@@ -203,13 +233,14 @@ describe("OWNERSHIP_SOURCES", () => {
     ]);
   });
 
-  it("marks the four synced row owners as row-owner stamps", () => {
+  it("marks the five synced row owners as row-owner stamps", () => {
     const rowOwners = OWNERSHIP_SOURCES.filter((source) => source.kind === "row-owner");
     expect(rowOwners.map((source) => source.path)).toEqual([
       "exercises.owner_id",
       "workout_sessions.user_id",
       "activities.user_id",
       "body_stats.user_id",
+      "routines.user_id",
     ]);
   });
 });
@@ -256,6 +287,12 @@ describe("classifyOwnership", () => {
       source: "body_stats.user_id",
       async seed(db) {
         await db.body_stats.add(bodyStat("body-1", USER_A));
+      },
+    },
+    {
+      source: "routines.user_id",
+      async seed(db) {
+        await db.routines.add(routine("routine-1", USER_A));
       },
     },
     {
@@ -359,6 +396,11 @@ async function seedTwoAccounts(db: WaveformDb): Promise<void> {
   await db.set_entries.bulkAdd([setRow("set-a", "entry-a"), setRow("set-b", "entry-b")]);
   await db.activities.bulkAdd([activity("activity-a", USER_A), activity("activity-b", USER_B)]);
   await db.body_stats.bulkAdd([bodyStat("body-a", USER_A), bodyStat("body-b", USER_B)]);
+  await db.routines.bulkAdd([routine("routine-a", USER_A), routine("routine-b", USER_B)]);
+  await db.routine_entries.bulkAdd([
+    routineEntry("routine-entry-a", "routine-a"),
+    routineEntry("routine-entry-b", "routine-b"),
+  ]);
   await db.climb_sends.bulkAdd([sends("activity-a"), sends("activity-b")]);
 
   const sessionA = session("session-a", USER_A);
@@ -385,6 +427,10 @@ async function seedTwoAccounts(db: WaveformDb): Promise<void> {
     op("op-set-a", "set_entries", setWriteA),
     op("op-set-b", "set_entries", setWriteB),
     op("op-session-b", "workout_sessions", sessionB),
+    op("op-routine-a", "routines", routine("routine-a", USER_A)),
+    op("op-routine-b", "routines", routine("routine-b", USER_B)),
+    op("op-routine-entry-a", "routine_entries", routineEntry("routine-entry-a", "routine-a")),
+    op("op-routine-entry-b", "routine_entries", routineEntry("routine-entry-b", "routine-b")),
   ]);
 
   await db.workout_drafts.bulkAdd([draft("draft-a"), draft("draft-b")]);
@@ -416,6 +462,10 @@ describe("wipeAccountDataFromDevice", () => {
     expect((await db.set_entries.toArray()).map((row) => row.id)).toEqual(["set-b"]);
     expect((await db.activities.toArray()).map((row) => row.id)).toEqual(["activity-b"]);
     expect((await db.body_stats.toArray()).map((row) => row.id)).toEqual(["body-b"]);
+    expect((await db.routines.toArray()).map((row) => row.id)).toEqual(["routine-b"]);
+    expect((await db.routine_entries.toArray()).map((row) => row.id)).toEqual([
+      "routine-entry-b",
+    ]);
     expect((await db.climb_sends.toArray()).map((row) => row.activity_id)).toEqual(["activity-b"]);
   });
 
@@ -427,7 +477,14 @@ describe("wipeAccountDataFromDevice", () => {
     await wipeAccountDataFromDevice(db, USER_A);
 
     const remaining = (await db.outbox.toArray()).map((row) => row.op_id).sort();
-    expect(remaining).toEqual(["op-entry-b", "op-exercise-b", "op-session-b", "op-set-b"]);
+    expect(remaining).toEqual([
+      "op-entry-b",
+      "op-exercise-b",
+      "op-routine-b",
+      "op-routine-entry-b",
+      "op-session-b",
+      "op-set-b",
+    ]);
     // Direct table deletes queue no new ops: the count only shrinks.
     expect(remaining.length).toBeLessThan(before);
   });

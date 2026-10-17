@@ -23,6 +23,8 @@ const STORE_LABELS: ReadonlyArray<{ key: keyof ImportStoreCounts; label: string 
   { key: "set_entries", label: "Sets" },
   { key: "activities", label: "Activities" },
   { key: "body_stats", label: "Body stats" },
+  { key: "routines", label: "Routines" },
+  { key: "routine_entries", label: "Routine entries" },
   { key: "climb_sends", label: "Climb sends" },
 ];
 
@@ -39,7 +41,8 @@ export function importSummaryRows(
   const rows: ImportSummaryRow[] = [];
   for (const { key, label } of STORE_LABELS) {
     const written = summary.stores[key];
-    const skipped = Math.max(0, backup[key].length - written);
+    const backupRows = backup[key] ?? [];
+    const skipped = Math.max(0, backupRows.length - written);
     if (written === 0 && skipped === 0) {
       continue;
     }

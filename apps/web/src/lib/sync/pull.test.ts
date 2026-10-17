@@ -86,6 +86,8 @@ describe("CLIENT_PULL_ORDER", () => {
   it("lists parents before children", () => {
     expect(CLIENT_PULL_ORDER).toEqual([
       "exercises",
+      "routines",
+      "routine_entries",
       "workout_sessions",
       "exercise_entries",
       "set_entries",
@@ -216,18 +218,72 @@ describe("mergePullRow", () => {
     expect(await db.outbox.count()).toBe(0);
   });
 
-  it("skips entities the client does not store", async () => {
-    const db = harness("foreign");
-    const row: PullRow = {
-      entity: "routines",
-      id: "r1",
-      applied_at: STAMP,
-      payload: { id: "r1", updated_at: STAMP },
+  it("merges a routine and its entry with no outbox op", async () => {
+    const db = harness("routine");
+    const routineRow = {
+      id: "routine-1",
+      user_id: "server-user-9",
+      name: "Push Day",
+      notes: null,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
     };
-    expect(await mergePullRow(db, row, new Date(STAMP))).toEqual({
-      merged: false,
+    const routinePull: PullRow = {
+      entity: "routines",
+      id: "routine-1",
+      applied_at: STAMP,
+      payload: { ...routineRow },
+    };
+    expect(await mergePullRow(db, routinePull, new Date(STAMP))).toEqual({
+      merged: true,
       conflict: false,
     });
+    expect((await db.routines.get("routine-1"))?.name).toBe("Push Day");
+
+    const entryRow = {
+      id: "routine-entry-1",
+      routine_id: "routine-1",
+      exercise_id: "exercise-1",
+      order_index: 0,
+      target_sets: 3,
+      target_reps: 8,
+      target_weight_kg: 60,
+      created_at: STAMP,
+      updated_at: STAMP,
+      deleted_at: null,
+    };
+    const entryPull: PullRow = {
+      entity: "routine_entries",
+      id: "routine-entry-1",
+      applied_at: STAMP,
+      payload: { ...entryRow },
+    };
+    expect(await mergePullRow(db, entryPull, new Date(STAMP))).toEqual({
+      merged: true,
+      conflict: false,
+    });
+    expect((await db.routine_entries.get("routine-entry-1"))?.routine_id).toBe("routine-1");
+    // Pulled rows never regenerate ops.
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it("ignores an entity the client does not store", async () => {
+    const db = harness("unknown-entity");
+    // The TS union matches CLIENT_PULL_ORDER today, but the server drives
+    // the wire, so an un-stored entity must be ignored rather than written.
+    const unknownRow = {
+      entity: "challenges",
+      id: "challenge-1",
+      applied_at: STAMP,
+      payload: { id: "challenge-1", updated_at: STAMP },
+    } as unknown as PullRow;
+
+    const result = await mergePullRow(db, unknownRow, new Date(STAMP));
+    expect(result).toEqual({ merged: false, conflict: false });
+    expect(await db.routines.count()).toBe(0);
+    expect(await db.workout_sessions.count()).toBe(0);
+    expect(await db.outbox.count()).toBe(0);
   });
 });
 
@@ -415,7 +471,7 @@ describe("pullAll", () => {
     expect(await getMeta(db, FULL_PULL_PENDING_KEY)).toBeUndefined();
   });
 
-  it("an empty run over six entities completes with no row merges", async () => {
+  it("an empty run over eight entities completes with no row merges", async () => {
     const db = harness("empty");
     const { api } = scriptedPull(new Map());
 

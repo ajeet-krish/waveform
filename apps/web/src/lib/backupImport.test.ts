@@ -183,6 +183,31 @@ function sampleBackup(): WaveformBackupV2 {
         deleted_at: null,
       },
     ],
+    routines: [
+      {
+        id: "routine-1",
+        user_id: "user-1",
+        name: "Push Day",
+        notes: null,
+        created_at: STAMP,
+        updated_at: STAMP,
+        deleted_at: null,
+      },
+    ],
+    routine_entries: [
+      {
+        id: "routine-entry-1",
+        routine_id: "routine-1",
+        exercise_id: BENCH_SEED_ID,
+        order_index: 0,
+        target_sets: 5,
+        target_reps: 5,
+        target_weight_kg: 80,
+        created_at: STAMP,
+        updated_at: STAMP,
+        deleted_at: null,
+      },
+    ],
     climb_sends: [
       {
         activity_id: "act-1",
@@ -203,6 +228,8 @@ function emptyBackup(): WaveformBackupV2 {
   backup.set_entries = [];
   backup.activities = [];
   backup.body_stats = [];
+  backup.routines = [];
+  backup.routine_entries = [];
   backup.climb_sends = [];
   return backup;
 }
@@ -238,6 +265,46 @@ describe("parseBackup", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.issues[0]).toContain("not valid JSON");
+    }
+  });
+
+  it("parses a backup without the optional routine arrays as empty", () => {
+    const text = tamperedText((root) => {
+      delete root.routines;
+      delete root.routine_entries;
+    });
+    const result = parseBackup(text);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.backup.routines).toEqual([]);
+      expect(result.backup.routine_entries).toEqual([]);
+    }
+  });
+
+  it("rejects a present routine collection that is not an array", () => {
+    const result = parseBackup(
+      tamperedText((root) => {
+        root.routines = {};
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((issue) => issue.includes("routines must be an array"))).toBe(true);
+    }
+  });
+
+  it("warns on a routine entry whose parent routine is absent", () => {
+    const result = parseBackup(
+      tamperedText((root) => {
+        const row = firstRow(root, "routine_entries");
+        if (row) {
+          row.routine_id = "routine-missing";
+        }
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings.some((warning) => warning.includes("routine-missing"))).toBe(true);
     }
   });
 
@@ -510,24 +577,46 @@ describe("applyBackupImport: merge", () => {
       set_entries: 1,
       activities: 2,
       body_stats: 1,
+      routines: 1,
+      routine_entries: 1,
       climb_sends: 1,
     });
     // Climb histograms are device-local: no ops. Custom exercises queue
     // one; server-owned catalog rows queue none.
-    expect(summary.opsQueued).toBe(7);
+    expect(summary.opsQueued).toBe(9);
     expect(summary.profileRestored).toBe(true);
 
     expect(await db.workout_sessions.get("sess-1")).toEqual(sampleBackup().workout_sessions[0]);
     expect((await db.local_profile.toArray())[0]?.display_name).toBe("Ada");
 
     const ops = await db.outbox.toArray();
-    expect(ops).toHaveLength(7);
+    expect(ops).toHaveLength(9);
     const sessionOp = ops.find((op) => op.entity === "workout_sessions");
     expect(sessionOp?.action).toBe("create");
     expect(sessionOp?.updated_at).toBe(STAMP);
     expect(sessionOp?.created_at).toBe(IMPORT_TIME);
     const tombOp = ops.find((op) => op.entity === "exercises" && op.action === "delete");
     expect(tombOp?.payload.id).toBe("ex-zettel");
+  });
+
+  it("merges routines and their entries with one op per row", async () => {
+    const db = harness("merge-routines");
+    const backup = emptyBackup();
+    backup.routines = sampleBackup().routines;
+    backup.routine_entries = sampleBackup().routine_entries;
+
+    const summary = await applyBackupImport(db, backup, { mode: "merge", now: importNow() });
+
+    expect(summary.stores.routines).toBe(1);
+    expect(summary.stores.routine_entries).toBe(1);
+    expect(summary.opsQueued).toBe(2);
+    expect((await db.routines.get("routine-1"))?.name).toBe("Push Day");
+    expect((await db.routine_entries.get("routine-entry-1"))?.target_sets).toBe(5);
+
+    const ops = await db.outbox.toArray();
+    expect(ops.map((op) => op.entity).sort()).toEqual(["routine_entries", "routines"]);
+    expect(ops.every((op) => op.action === "create")).toBe(true);
+    expect(ops.every((op) => op.updated_at === STAMP)).toBe(true);
   });
 
   it("queues exactly one op for a custom (owned) exercise on merge", async () => {
@@ -573,6 +662,7 @@ describe("applyBackupImport: merge", () => {
     }));
     backup.activities = backup.activities.map((row) => ({ ...row, user_id: "foreign-user" }));
     backup.body_stats = backup.body_stats.map((row) => ({ ...row, user_id: "foreign-user" }));
+    backup.routines = (backup.routines ?? []).map((row) => ({ ...row, user_id: "foreign-user" }));
 
     const summary = await applyBackupImport(db, backup, { mode: "merge", now: importNow() });
 
@@ -581,6 +671,7 @@ describe("applyBackupImport: merge", () => {
     expect((await db.workout_sessions.get("sess-1"))?.user_id).toBe("local-user");
     expect((await db.activities.get("act-1"))?.user_id).toBe("local-user");
     expect((await db.body_stats.get("body-1"))?.user_id).toBe("local-user");
+    expect((await db.routines.get("routine-1"))?.user_id).toBe("local-user");
     expect((await db.exercises.get("ex-zettel"))?.owner_id).toBe("local-user");
     // Global catalog rows stay server-owned.
     expect((await db.exercises.get(BENCH_SEED_ID))?.owner_id).toBeNull();
@@ -608,6 +699,8 @@ describe("applyBackupImport: merge", () => {
       set_entries: 0,
       activities: 0,
       body_stats: 0,
+      routines: 0,
+      routine_entries: 0,
       climb_sends: 0,
     });
     expect(await db.outbox.count()).toBe(opsAfterFirst);
@@ -899,11 +992,13 @@ describe("applyBackupImport: replace", () => {
       set_entries: 1,
       activities: 2,
       body_stats: 1,
+      routines: 1,
+      routine_entries: 1,
       climb_sends: 1,
     });
-    // One op per restored user-owned row across the six synced entities
+    // One op per restored user-owned row across the eight synced entities
     // (no climb ops, no catalog-exercise ops).
-    expect(summary.opsQueued).toBe(7);
+    expect(summary.opsQueued).toBe(9);
 
     // Local-only rows are gone; backup rows are back with recomputed e1rm.
     expect(await db.workout_sessions.get("sess-local")).toBeUndefined();
@@ -912,7 +1007,7 @@ describe("applyBackupImport: replace", () => {
 
     // The stale op is gone; the queue is exactly the restored user-owned rows.
     const ops = await db.outbox.toArray();
-    expect(ops).toHaveLength(7);
+    expect(ops).toHaveLength(9);
     expect(ops.some((op) => op.op_id === "op-stale")).toBe(false);
     expect(ops.every((op) => op.created_at === IMPORT_TIME)).toBe(true);
     const setOp = ops.find((op) => op.entity === "set_entries");
@@ -940,6 +1035,7 @@ describe("applyBackupImport: replace", () => {
     }));
     backup.activities = backup.activities.map((row) => ({ ...row, user_id: "foreign-user" }));
     backup.body_stats = backup.body_stats.map((row) => ({ ...row, user_id: "foreign-user" }));
+    backup.routines = (backup.routines ?? []).map((row) => ({ ...row, user_id: "foreign-user" }));
 
     const summary = await applyBackupImport(db, backup, {
       mode: "replace",
@@ -955,6 +1051,7 @@ describe("applyBackupImport: replace", () => {
     expect((await db.workout_sessions.get("sess-1"))?.user_id).toBe("local-user");
     expect((await db.activities.get("act-1"))?.user_id).toBe("local-user");
     expect((await db.body_stats.get("body-1"))?.user_id).toBe("local-user");
+    expect((await db.routines.get("routine-1"))?.user_id).toBe("local-user");
     expect((await db.exercises.get("ex-zettel"))?.owner_id).toBe("local-user");
     expect((await db.exercises.get(BENCH_SEED_ID))?.owner_id).toBeNull();
   });
@@ -1039,6 +1136,8 @@ describe("applyBackupImport: replace", () => {
       sets: await db.set_entries.toArray(),
       activities: await db.activities.toArray(),
       body: await db.body_stats.toArray(),
+      routines: await db.routines.toArray(),
+      routineEntries: await db.routine_entries.toArray(),
       sends: await db.climb_sends.toArray(),
       profile: await db.local_profile.toArray(),
       outbox: await db.outbox.toArray(),
@@ -1064,6 +1163,8 @@ describe("applyBackupImport: replace", () => {
     expect(await db.set_entries.toArray()).toEqual(snapshot.sets);
     expect(await db.activities.toArray()).toEqual(snapshot.activities);
     expect(await db.body_stats.toArray()).toEqual(snapshot.body);
+    expect(await db.routines.toArray()).toEqual(snapshot.routines);
+    expect(await db.routine_entries.toArray()).toEqual(snapshot.routineEntries);
     expect(await db.climb_sends.toArray()).toEqual(snapshot.sends);
     expect(await db.local_profile.toArray()).toEqual(snapshot.profile);
     expect(await db.outbox.toArray()).toEqual(snapshot.outbox);
@@ -1093,6 +1194,8 @@ describe("full round trip through parse and replace", () => {
     const restored = await collectBackup(target);
     expect(restored.profile).toEqual(collected.profile);
     expect(restored.workout_sessions).toEqual(collected.workout_sessions);
+    expect(restored.routines).toEqual(collected.routines);
+    expect(restored.routine_entries).toEqual(collected.routine_entries);
   });
 });
 

@@ -238,12 +238,27 @@ export type RoutineEntry = { id: string, routine_id: string, exercise_id: string
 applied_at: string, deleted_at: string | null, };
 
 /**
+ * `routine_entries` target bounds, mirroring `ROUTINE_RULES` in
+ * `apps/web/src/db/validation.ts`. `target_sets` and `target_reps` carry
+ * no SQL CHECK of their own, so these bounds are the shared contract the
+ * client form and repo guards enforce; `target_weight_kg` mirrors the
+ * `routine_entries_target_weight_kg_range` CHECK (null or strictly
+ * positive and at most 1500).
+ */
+export type RoutineRules = { targetSetsMin: number, targetSetsMax: number, targetRepsMin: number, targetRepsMax: number, 
+/**
+ * Strict lower bound: 0 kg is not a plausible target, so the SQL
+ * CHECK is `target_weight_kg > 0`.
+ */
+targetWeightMinKgExclusive: number, targetWeightMaxKg: number, };
+
+/**
  * The whole rule tree in one value. Field names deep-equal the client
  * constants in `apps/web/src/db/validation.ts`; the vitest parity test
  * (`apps/web/src/db/rulesParity.test.ts`) and `export_ts_rules` keep the
  * two sides honest.
  */
-export type RuleConstants = { set: SetRules, activity: ActivityRules, body: BodyRules, sync: SyncLimits, password: PasswordRules, };
+export type RuleConstants = { set: SetRules, activity: ActivityRules, body: BodyRules, routine: RoutineRules, sync: SyncLimits, password: PasswordRules, };
 
 /**
  * A single set. `e1rm_kg` is a stored generated column (Brzycki) written by

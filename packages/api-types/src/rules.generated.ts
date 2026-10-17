@@ -21,6 +21,14 @@ export const RULE_CONSTANTS: RuleConstants = {
     "bodyfatMinPct": 0,
     "bodyfatMaxPct": 100
   },
+  "routine": {
+    "targetSetsMin": 1,
+    "targetSetsMax": 20,
+    "targetRepsMin": 1,
+    "targetRepsMax": 36,
+    "targetWeightMinKgExclusive": 0,
+    "targetWeightMaxKg": 1500
+  },
   "sync": {
     "maxOpsPerPush": 200,
     "pullPageSize": 500,

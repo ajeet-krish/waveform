@@ -146,6 +146,27 @@ async function seedRows(db: WaveformDb): Promise<void> {
     counts: new Array<number>(17).fill(0).map((_, index) => (index === 5 ? 1 : 0)),
     updated_at: STAMP,
   });
+  await db.routines.put({
+    id: "routine-1",
+    user_id: "user-1",
+    name: "Push Day",
+    notes: null,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  });
+  await db.routine_entries.put({
+    id: "routine-entry-1",
+    routine_id: "routine-1",
+    exercise_id: "ex-1",
+    order_index: 0,
+    target_sets: 5,
+    target_reps: 5,
+    target_weight_kg: 80,
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+  });
 }
 
 describe("collectBackup", () => {
@@ -167,6 +188,8 @@ describe("collectBackup", () => {
     expect(backup.activities.some((row) => row.deleted_at !== null)).toBe(true);
     expect(backup.body_stats.map((row) => row.id)).toEqual(["body-1"]);
     expect(backup.climb_sends.map((row) => row.activity_id)).toEqual(["act-1"]);
+    expect(backup.routines?.map((row) => row.id)).toEqual(["routine-1"]);
+    expect(backup.routine_entries?.map((row) => row.id)).toEqual(["routine-entry-1"]);
     expect(Number.isNaN(Date.parse(backup.exported_at))).toBe(false);
   });
 
@@ -181,6 +204,8 @@ describe("collectBackup", () => {
     expect(backup.activities).toEqual([]);
     expect(backup.body_stats).toEqual([]);
     expect(backup.climb_sends).toEqual([]);
+    expect(backup.routines).toEqual([]);
+    expect(backup.routine_entries).toEqual([]);
   });
 });
 

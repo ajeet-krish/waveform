@@ -28,10 +28,10 @@
  * A backup carries the identity of the account that made it, which may
  * not be this device's account. Every imported owner-bearing row is
  * re-stamped to the LOCAL profile id (custom exercises' owner_id, and
- * user_id on sessions, activities, and body_stats), and an existing
- * local_profile id is never replaced by a foreign one from the file: the
- * restored log belongs to the account on this device. Global catalog
- * exercises keep owner_id null.
+ * user_id on sessions, activities, body_stats, and routines), and an
+ * existing local_profile id is never replaced by a foreign one from the
+ * file: the restored log belongs to the account on this device. Global
+ * catalog exercises keep owner_id null.
  */
 
 import { e1rmBrzycki } from "@waveform/scoring";
@@ -41,6 +41,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -61,6 +63,8 @@ import {
   assertValidActivity,
   assertValidBodyStat,
   assertValidEntry,
+  assertValidRoutine,
+  assertValidRoutineEntry,
   assertValidSet,
   assertValidWorkout,
   LocalValidationError,
@@ -85,6 +89,8 @@ export type ImportStoreCounts = {
   set_entries: number;
   activities: number;
   body_stats: number;
+  routines: number;
+  routine_entries: number;
   climb_sends: number;
 };
 
@@ -112,6 +118,8 @@ function emptyCounts(): ImportStoreCounts {
     set_entries: 0,
     activities: 0,
     body_stats: 0,
+    routines: 0,
+    routine_entries: 0,
     climb_sends: 0,
   };
 }
@@ -271,6 +279,13 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
   if (!Array.isArray(raw.climb_sends)) {
     issues.push("climb_sends must be an array.");
   }
+  // Routines are additive v2 fields: absent means a backup written before
+  // Phase 2.1 and parses as empty; a present non-array is malformed.
+  for (const key of ["routines", "routine_entries"] as const) {
+    if (raw[key] !== undefined && !Array.isArray(raw[key])) {
+      issues.push(`${key} must be an array.`);
+    }
+  }
   if (issues.length > 0) {
     return { ok: false, issues };
   }
@@ -323,6 +338,8 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
   const setRows = objectRows("set_entries", readRows("set_entries"));
   const activityRows = objectRows("activities", readRows("activities"));
   const bodyRows = objectRows("body_stats", readRows("body_stats"));
+  const routineRows = objectRows("routines", readRows("routines"));
+  const routineEntryRows = objectRows("routine_entries", readRows("routine_entries"));
   const climbRows = objectRows("climb_sends", readRows("climb_sends"));
 
   for (const row of exerciseRows) {
@@ -362,6 +379,27 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
     const label = `body_stats/${String(row.id)}`;
     issues.push(...baseRowIssues(label, row));
     issues.push(...guardIssues(label, () => assertValidBodyStat(row as unknown as BodyStats)));
+  }
+  for (const row of routineRows) {
+    const label = `routines/${String(row.id)}`;
+    issues.push(...baseRowIssues(label, row));
+    issues.push(...guardIssues(label, () => assertValidRoutine(row as unknown as Routine)));
+  }
+  for (const row of routineEntryRows) {
+    const label = `routine_entries/${String(row.id)}`;
+    issues.push(...baseRowIssues(label, row));
+    issues.push(
+      ...guardIssues(label, () => assertValidRoutineEntry(row as unknown as RoutineEntry)),
+    );
+  }
+
+  const routineIds = new Set(routineRows.map((row) => String(row.id)));
+  for (const row of routineEntryRows) {
+    if (typeof row.routine_id === "string" && !routineIds.has(row.routine_id)) {
+      warnings.push(
+        `A routine entry references routine ${row.routine_id}, which the backup does not contain.`,
+      );
+    }
   }
 
   const activityIds = new Set(activityRows.map((row) => String(row.id)));
@@ -404,6 +442,8 @@ function parseBackupRaw(raw: unknown): ImportParseResult {
     activities: readRows("activities") as unknown as Array<LocalRow<Activity>>,
     body_stats: readRows("body_stats") as unknown as Array<LocalRow<BodyStats>>,
     climb_sends: readRows("climb_sends") as unknown as ClimbSends[],
+    routines: readRows("routines") as unknown as Array<LocalRow<Routine>>,
+    routine_entries: readRows("routine_entries") as unknown as Array<LocalRow<RoutineEntry>>,
   };
   return { ok: true, backup, warnings };
 }
@@ -562,6 +602,10 @@ function restampBodyStat(row: LocalRow<BodyStats>, ownerId: string | null): Loca
   return ownerId === null ? row : { ...row, user_id: ownerId };
 }
 
+function restampRoutine(row: LocalRow<Routine>, ownerId: string | null): LocalRow<Routine> {
+  return ownerId === null ? row : { ...row, user_id: ownerId };
+}
+
 async function runMerge(
   db: WaveformDb,
   backup: WaveformBackupV2,
@@ -576,6 +620,8 @@ async function runMerge(
       db.set_entries,
       db.activities,
       db.body_stats,
+      db.routines,
+      db.routine_entries,
       db.climb_sends,
       db.local_profile,
       db.outbox,
@@ -623,6 +669,20 @@ async function runMerge(
         now,
         ops,
       );
+      stores.routines = await mergeById(
+        db.routines,
+        "routines",
+        (backup.routines ?? []).map((row) => restampRoutine(row, ownerId)),
+        now,
+        ops,
+      );
+      stores.routine_entries = await mergeById(
+        db.routine_entries,
+        "routine_entries",
+        backup.routine_entries ?? [],
+        now,
+        ops,
+      );
       stores.climb_sends = await mergeClimbSends(db, backup.climb_sends);
       await db.outbox.bulkAdd(ops);
       let profileRestored = false;
@@ -649,6 +709,8 @@ async function runReplace(
       db.set_entries,
       db.activities,
       db.body_stats,
+      db.routines,
+      db.routine_entries,
       db.climb_sends,
       db.local_profile,
       db.outbox,
@@ -667,6 +729,8 @@ async function runReplace(
       await db.set_entries.clear();
       await db.activities.clear();
       await db.body_stats.clear();
+      await db.routines.clear();
+      await db.routine_entries.clear();
       await db.climb_sends.clear();
       await db.local_profile.clear();
       await db.outbox.clear();
@@ -705,6 +769,17 @@ async function runReplace(
         await db.body_stats.put(row);
         ops.push(buildOutboxOp("body_stats", restoreAction(row), row, now, row.updated_at));
       }
+      for (const raw of backup.routines ?? []) {
+        const row = restampRoutine(raw, ownerId);
+        await db.routines.put(row);
+        ops.push(buildOutboxOp("routines", restoreAction(row), row, now, row.updated_at));
+      }
+      for (const row of backup.routine_entries ?? []) {
+        await db.routine_entries.put(row);
+        ops.push(
+          buildOutboxOp("routine_entries", restoreAction(row), row, now, row.updated_at),
+        );
+      }
       for (const sends of backup.climb_sends) {
         await db.climb_sends.put(sends);
       }
@@ -730,6 +805,8 @@ async function runReplace(
         set_entries: backup.set_entries.length,
         activities: backup.activities.length,
         body_stats: backup.body_stats.length,
+        routines: (backup.routines ?? []).length,
+        routine_entries: (backup.routine_entries ?? []).length,
         climb_sends: backup.climb_sends.length,
       };
       return { mode: "replace", stores, profileRestored, opsQueued: ops.length };

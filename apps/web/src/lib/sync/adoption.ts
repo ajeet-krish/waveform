@@ -10,9 +10,10 @@
  *
  * Ownership lives only where the schema puts it: `exercises.owner_id`
  * (null marks a global catalog row, which stays global) and `user_id`
- * on workout_sessions, activities, and body_stats. exercise_entries and
- * set_entries have no owner column of their own; they scope through
- * their parent rows, so rewriting the parents re-scopes them too.
+ * on workout_sessions, activities, body_stats, and routines.
+ * exercise_entries, set_entries, and routine_entries have no owner
+ * column of their own; they scope through their parent rows, so
+ * rewriting the parents re-scopes them too.
  *
  * Two strategies, chosen by the engine (pass 2): adoptLocalUser keeps
  * the data and rewrites its ownership, adoptStartEmpty wipes the synced
@@ -87,8 +88,8 @@ async function rewriteProfile(db: WaveformDb, userId: string): Promise<boolean> 
  * Rebases the whole local log onto `userId` in ONE rw transaction over
  * the synced stores, outbox, local_profile, and sync_meta: rewrites
  * `owner_id` on custom exercises (catalog rows keep owner_id null),
- * `user_id` on workout_sessions, activities, and body_stats, and the
- * same fields inside every queued outbox payload, then re-keys
+ * `user_id` on workout_sessions, activities, body_stats, and routines,
+ * and the same fields inside every queued outbox payload, then re-keys
  * local_profile and stamps `adopted_user_id`. Idempotent: when the
  * device is already adopted for this user it touches nothing and
  * reports adopted false. Writes NO new outbox ops (ownership is
@@ -110,6 +111,8 @@ export async function adoptLocalUser(db: WaveformDb, userId: string): Promise<Ad
       db.set_entries,
       db.activities,
       db.body_stats,
+      db.routines,
+      db.routine_entries,
       db.outbox,
       db.local_profile,
       db.sync_meta,
@@ -156,6 +159,12 @@ export async function adoptLocalUser(db: WaveformDb, userId: string): Promise<Ad
           rows += 1;
         }
       });
+      await db.routines.toCollection().modify((row) => {
+        if (row.user_id !== userId) {
+          row.user_id = userId;
+          rows += 1;
+        }
+      });
 
       let opsRewritten = 0;
       await db.outbox.toCollection().modify((op) => {
@@ -168,7 +177,8 @@ export async function adoptLocalUser(db: WaveformDb, userId: string): Promise<Ad
         } else if (
           op.entity === "workout_sessions" ||
           op.entity === "activities" ||
-          op.entity === "body_stats"
+          op.entity === "body_stats" ||
+          op.entity === "routines"
         ) {
           const payload = op.payload as { user_id: string };
           if (payload.user_id !== userId) {
@@ -210,6 +220,8 @@ export async function adoptStartEmpty(db: WaveformDb, userId: string): Promise<S
       db.set_entries,
       db.activities,
       db.body_stats,
+      db.routines,
+      db.routine_entries,
       db.outbox,
       db.climb_sends,
       db.local_profile,
@@ -233,6 +245,8 @@ export async function adoptStartEmpty(db: WaveformDb, userId: string): Promise<S
         db.set_entries,
         db.activities,
         db.body_stats,
+        db.routines,
+        db.routine_entries,
       ]) {
         rowsWiped += await table.count();
         await table.clear();

@@ -43,6 +43,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -59,12 +61,15 @@ import {
 } from "./meta";
 
 /**
- * The pull entity order, parents first: an exercise before the sessions
- * that use it, a session before its entries, an entry before its sets.
- * The six client-known sync entities; routines join in a later phase.
+ * The pull entity order, parents first: an exercise before the routines
+ * and sessions that use it, a routine before its entries, a session before
+ * its entries, an entry before its sets. The eight client-known sync
+ * entities; routines land here so a session's `routine_id` parent exists.
  */
 export const CLIENT_PULL_ORDER: readonly OutboxEntity[] = [
   "exercises",
+  "routines",
+  "routine_entries",
   "workout_sessions",
   "exercise_entries",
   "set_entries",
@@ -182,6 +187,10 @@ async function readLocal(
   switch (entity) {
     case "exercises":
       return db.exercises.get(id);
+    case "routines":
+      return db.routines.get(id);
+    case "routine_entries":
+      return db.routine_entries.get(id);
     case "workout_sessions":
       return db.workout_sessions.get(id);
     case "exercise_entries":
@@ -205,6 +214,12 @@ async function writePulled(
   switch (entity) {
     case "exercises":
       await db.exercises.put(payload as unknown as LocalRow<Exercise>);
+      return;
+    case "routines":
+      await db.routines.put(payload as unknown as LocalRow<Routine>);
+      return;
+    case "routine_entries":
+      await db.routine_entries.put(payload as unknown as LocalRow<RoutineEntry>);
       return;
     case "workout_sessions":
       await db.workout_sessions.put(payload as unknown as LocalRow<WorkoutSession>);
@@ -269,8 +284,7 @@ async function appendConflict(
  * transaction over a subset of the same tables). Incoming strictly
  * newer: superseded queued ops are dropped (one conflict entry
  * appended), then the payload is written with no outbox op. Tie or
- * older: the local row is kept and queued ops are left alone. Rows for
- * entities the client does not store (routines, ...) are skipped.
+ * older: the local row is kept and queued ops are left alone.
  */
 export async function mergePullRow(
   db: WaveformDb,
@@ -288,6 +302,8 @@ export async function mergePullRow(
     "rw",
     [
       db.exercises,
+      db.routines,
+      db.routine_entries,
       db.workout_sessions,
       db.exercise_entries,
       db.set_entries,
@@ -337,7 +353,7 @@ async function readCursor(db: WaveformDb, entity: OutboxEntity): Promise<string 
  * that is not already pending sets `full_pull_pending` and starts every
  * entity from a null cursor WITHOUT deleting the stored cursors; a run
  * that finds the flag already set resumes incrementally from them. When
- * all six entities reach the tip, `last_synced_at` is stamped and, when
+ * all eight entities reach the tip, `last_synced_at` is stamped and, when
  * the run was (or finished) a full re-pull, `last_full_pull_at` is
  * stamped and `full_pull_pending` is cleared. An ApiError mid-run
  * (offline, timeout, auth-expired, 4xx/5xx) stops the run with complete
@@ -385,6 +401,8 @@ export async function pullAll(params: PullAllParams): Promise<PullAllResult> {
         "rw",
         [
           db.exercises,
+          db.routines,
+          db.routine_entries,
           db.workout_sessions,
           db.exercise_entries,
           db.set_entries,

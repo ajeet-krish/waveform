@@ -46,6 +46,28 @@ export const BODY_RULES = {
   bodyfatMaxPct: 100,
 } as const;
 
+/**
+ * The routine_entries target bounds in one place, mirroring the
+ * `RULE_CONSTANTS.routine` tree generated from `crates/db`
+ * (`packages/api-types/src/rules.generated.ts`). `target_sets` and
+ * `target_reps` carry no SQL CHECK of their own, so these bounds are the
+ * shared contract the form layer and the repo guard enforce;
+ * `target_weight_kg` mirrors the `routine_entries_target_weight_kg_range`
+ * CHECK (null or strictly positive).
+ */
+export const ROUTINE_RULES = {
+  targetSetsMin: 1,
+  targetSetsMax: 20,
+  targetRepsMin: 1,
+  targetRepsMax: 36,
+  targetWeightMinKgExclusive: 0,
+  targetWeightMaxKg: 1500,
+} as const;
+
+/** Routine name bounds after trimming (the DB only requires NOT NULL). */
+export const ROUTINE_NAME_MIN_LENGTH = 1;
+export const ROUTINE_NAME_MAX_LENGTH = 60;
+
 /** Raised when a local row violates a schema-equivalent constraint. */
 export class LocalValidationError extends Error {
   /** Human-readable one-per-violation list; defaults to the message. */
@@ -94,6 +116,18 @@ export type BodyStatCheck = {
   hips_cm: number | null;
   thigh_cm: number | null;
   calf_cm: number | null;
+};
+
+export type RoutineCheck = {
+  name: string;
+  notes: string | null;
+};
+
+export type RoutineEntryCheck = {
+  order_index: number;
+  target_sets: number;
+  target_reps: number;
+  target_weight_kg: number | null;
 };
 
 function fail(what: string, issues: string[]): never {
@@ -272,5 +306,72 @@ export function assertValidBodyStat(stat: BodyStatCheck): void {
   }
   if (issues.length > 0) {
     fail("body stat", issues);
+  }
+}
+
+/**
+ * routines: name is required and 1..60 characters after trimming; notes is
+ * optional (null or a string). The DB only enforces NOT NULL on name, so
+ * the length bound is the client contract.
+ */
+export function assertValidRoutine(routine: RoutineCheck): void {
+  const issues: string[] = [];
+  if (typeof routine.name !== "string") {
+    issues.push(`name must be a string (got ${routine.name})`);
+  } else {
+    const trimmed = routine.name.trim();
+    if (trimmed.length < ROUTINE_NAME_MIN_LENGTH || trimmed.length > ROUTINE_NAME_MAX_LENGTH) {
+      issues.push(
+        `name must be ${ROUTINE_NAME_MIN_LENGTH}..${ROUTINE_NAME_MAX_LENGTH} characters after trimming (got ${trimmed.length})`,
+      );
+    }
+  }
+  if (!(routine.notes === null || typeof routine.notes === "string")) {
+    issues.push(`notes must be null or a string (got ${routine.notes})`);
+  }
+  if (issues.length > 0) {
+    fail("routine", issues);
+  }
+}
+
+/**
+ * routine_entries: order_index integer >= 0, target_sets and target_reps
+ * are integers within the shared bounds, and target_weight_kg is null or
+ * strictly positive and at most 1500 (the SQL CHECK).
+ */
+export function assertValidRoutineEntry(entry: RoutineEntryCheck): void {
+  const issues: string[] = [];
+  const rules = ROUTINE_RULES;
+  if (!Number.isInteger(entry.order_index) || entry.order_index < 0) {
+    issues.push(`order_index must be an integer >= 0 (got ${entry.order_index})`);
+  }
+  if (
+    !Number.isInteger(entry.target_sets) ||
+    entry.target_sets < rules.targetSetsMin ||
+    entry.target_sets > rules.targetSetsMax
+  ) {
+    issues.push(
+      `target_sets must be an integer in ${rules.targetSetsMin}..${rules.targetSetsMax} (got ${entry.target_sets})`,
+    );
+  }
+  if (
+    !Number.isInteger(entry.target_reps) ||
+    entry.target_reps < rules.targetRepsMin ||
+    entry.target_reps > rules.targetRepsMax
+  ) {
+    issues.push(
+      `target_reps must be an integer in ${rules.targetRepsMin}..${rules.targetRepsMax} (got ${entry.target_reps})`,
+    );
+  }
+  finiteOrNullIssue(
+    issues,
+    "target_weight_kg",
+    entry.target_weight_kg,
+    true,
+    rules.targetWeightMinKgExclusive,
+    rules.targetWeightMaxKg,
+  );
+  if (issues.length > 0) {
+    fail("routine entry", issues);
   }
 }

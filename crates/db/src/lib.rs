@@ -54,7 +54,7 @@ mod export_tests {
     use crate::dto::{
         ActivityRules, ApiErrorBody, ApiErrorCode, AuthResponse, BodyRules, LoginRequest, OpAction,
         OpResult, OpStatus, PasswordRules, PullPage, PullRow, PushOp, PushRequest, PushResponse,
-        RuleConstants, SetRules, SignupRequest, SyncEntity, SyncLimits,
+        RoutineRules, RuleConstants, SetRules, SignupRequest, SyncEntity, SyncLimits,
     };
     use crate::{
         Activity, ActivityType, BodyStats, Challenge, Exercise, ExerciseEntry, Group, GroupMember,
@@ -103,6 +103,7 @@ mod export_tests {
             SetRules::export(),
             ActivityRules::export(),
             BodyRules::export(),
+            RoutineRules::export(),
             SyncLimits::export(),
             PasswordRules::export(),
             RuleConstants::export(),

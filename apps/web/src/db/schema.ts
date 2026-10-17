@@ -2,12 +2,12 @@
  * Dexie schema for the local-first data core.
  *
  * Version 1 declares eight stores. Version 2 adds activities, body_stats,
- * and the device-local climb_sends histogram keyed by activity id; the v1
- * to v2 upgrade is lossless because Dexie only adds the new stores and
- * leaves existing data untouched. Every synced row mirrors its SQL table
- * minus `applied_at` (server-stamped); the outbox holds queued mutations
- * and workout_drafts/local_profile/sync_meta/climb_sends stay
- * device-local.
+ * and the device-local climb_sends histogram keyed by activity id. Version
+ * 3 adds the routines and routine_entries tables. Every upgrade is
+ * lossless because Dexie only adds the new stores and leaves existing data
+ * untouched. Every synced row mirrors its SQL table minus `applied_at`
+ * (server-stamped); the outbox holds queued mutations and
+ * workout_drafts/local_profile/sync_meta/climb_sends stay device-local.
  */
 
 import Dexie, { type EntityTable } from "dexie";
@@ -16,6 +16,8 @@ import type {
   BodyStats,
   Exercise,
   ExerciseEntry,
+  Routine,
+  RoutineEntry,
   SetEntry,
   WorkoutSession,
 } from "@waveform/api-types";
@@ -40,6 +42,8 @@ export class WaveformDb extends Dexie {
   activities!: EntityTable<LocalRow<Activity>, "id">;
   body_stats!: EntityTable<LocalRow<BodyStats>, "id">;
   climb_sends!: EntityTable<ClimbSends, "activity_id">;
+  routines!: EntityTable<LocalRow<Routine>, "id">;
+  routine_entries!: EntityTable<LocalRow<RoutineEntry>, "id">;
 
   constructor(name = "waveform") {
     super(name);
@@ -65,6 +69,21 @@ export class WaveformDb extends Dexie {
       activities: "id, local_date, type",
       body_stats: "id, local_date",
       climb_sends: "activity_id",
+    });
+    this.version(3).stores({
+      exercises: "id, owner_id",
+      workout_sessions: "id, local_date",
+      exercise_entries: "id, workout_id",
+      set_entries: "id, exercise_entry_id",
+      workout_drafts: "id",
+      outbox: "op_id, created_at",
+      local_profile: "id",
+      sync_meta: "key",
+      activities: "id, local_date, type",
+      body_stats: "id, local_date",
+      climb_sends: "activity_id",
+      routines: "id, user_id, updated_at",
+      routine_entries: "id, routine_id, exercise_id",
     });
   }
 }

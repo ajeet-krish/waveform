@@ -1057,3 +1057,61 @@ Regression sweep: no new correctness or data-loss bug found in the wipe (owned d
 exactly the target's rows and scoped child ops), the stop/abort threading (partial drain and
 pull results stand, cursors and merges stay atomic per page), the import re-stamping (rows and
 op payloads match, catalog rows stay null), or the pending-flag lifecycle.
+
+## 2026-10-16 - Tier 2.1 routines data layer (code review)
+
+Verdict: PASS WITH ISSUES. Scope: uncommitted changes for Phase 2.1, the routines data layer.
+Rust (crates/db/src/dto.rs RoutineRules + RuleConstants.routine, crates/db/src/lib.rs export_ts,
+regenerated packages/api-types/src/generated.ts and rules.generated.ts) and TypeScript
+(apps/web/src/db types, schema v3, validation, rulesParity, NEW repos/routines.ts + tests,
+sync/pull, sync/ownership, sync/adoption, lib/backup, lib/backupImport, lib/importSummary).
+Server tables, EntitySpec, and DTOs for the routine pair pre-exist and were cross-checked
+(crates/db/src/queries/spec.rs:218-258). Static review only, no shell in this environment.
+
+Core claims verified: every RoutineRepo mutation writes rows and outbox ops in ONE Dexie
+transaction (routines.ts:202, 216, 296, 313, 348, 374) with rollback proven (routines.test.ts:391-405);
+owner guards run before any write and fail closed on a missing parent (routines.ts:89-122,
+tests :408-443); softDelete tombstones the routine and its live entries with one full-row delete
+op per live row (:236-275, test :195-222); Dexie v3 is purely additive and lossless for v1 to v3
+and v2 to v3 (schema.ts:73-87, schema.test.ts:73-195); CLIENT_PULL_ORDER puts routines after
+exercises and before workout_sessions with routine_entries after both (pull.ts:69-78), and the
+merge and page transactions include the new stores (:301-314, :400-413); backup v2 routine
+arrays are optional (old backups parse), exported, and applied in merge and replace with
+routine user_id re-stamped to the local profile id and entries following the parent
+(backupImport.ts:596-598, 663-676, 763-773), isServerOwnedRow false for both (serverOwned.ts:18-25);
+ownership registers routines.user_id, wipe removes routines + entries and scopes entry ops
+through the parent routine id (ownership.ts:76-79, 357-365, 396-402), adoption rebases routines
+rows and payloads (adoption.ts:162-167, 177-188). Rust RoutineRules (1..20 sets, 1..36 reps,
+target weight > 0 and <= 1500) matches ROUTINE_RULES and the routine_entries_target_weight_kg_range
+CHECK (0003_hardening.sql:216-217); RuleConstants change is additive; export_ts list and both
+generated files are consistent. Tests cover transactional rollback, owner guards, softDelete
+cascade, reorder happy path, v2 to v3 upgrade, pull round trip, backup round trip, merge
+idempotence, and rules parity. The replaced "skips entities" pull test narrowed coverage (see F4).
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | apps/web/src/db/repos/routines.ts:217-221, 319-323 | update and updateEntry mutate tombstoned rows: they check only `!existing`, unlike the repo convention (activities.ts:191-193, workouts.ts:313 throw "not found" on a tombstone). An update on a tombstone bumps updated_at, keeps deleted_at, and queues an "update" op carrying a tombstoned row, muddying LWW and the op stream. | Add `existing.deleted_at !== null` to the not-found throw in both; add tests that both throw and queue nothing. |
+| Medium | apps/web/src/db/repos/routines.ts:302, 354-363 | loadOwnedRoutine accepts a soft-deleted parent, so addEntry creates a live entry under a tombstoned routine (invisible in getWithEntries yet pushed); removeEntry is not idempotent, re-tombstoning an already-deleted entry and queuing a duplicate delete op (softDelete is idempotent and tested; removeEntry diverges). | Reject a tombstoned parent in loadOwnedRoutine; make removeEntry return the existing tombstone with no new op when already deleted (mirror activities.ts:250-252). |
+| Medium | apps/web/src/db/repos/routines.ts:382-401 | reorderEntries accepts partial or duplicate id lists and tombstoned ids. A partial list leaves unlisted entries colliding with rewritten indexes (reorder over one id leaves two entries at order_index 0); a duplicate id writes the same row twice with two ops. | Require orderedEntryIds to be a permutation of the routine's live entry ids before any write; reject tombstoned and cross-routine ids; test the rejections. |
+| Low | apps/web/src/lib/sync/pull.test.ts:100-270 | The replaced "skips entities" test left isLocalEntity's early return (pull.ts:294-296) untested. The TS SyncEntity union equals CLIENT_PULL_ORDER today, but the server drives the wire and Phase 3 adds challenges; an un-stored entity must be ignored, not written. | Re-add a test feeding a runtime-unknown entity (cast) asserting `{ merged: false, conflict: false }` and zero writes. |
+| Low | apps/web/src/lib/sync/ownership.ts:86-89 | `outbox.payload.user_id` meaning says "session, activity, or body-stat op" but outboxOwnerId (:145) also reads user_id for routines ops. | Mention routine ops in the meaning text. |
+| Low | apps/web/src/lib/backupImport.ts:28-34 | Header comment omits routines from the re-stamped fields list though restampRoutine (:596-598) runs in both modes. | Add routines to the comment. |
+| Low | apps/web/src/lib/backupImport.ts:383-394 | Parse never cross-checks routine_entries.routine_id against the backup's routines (same pre-existing pattern as exercise_entries). An orphan entry merges, queues an op, and that op can survive a later account wipe because wipe scopes entry ops through locally existing parent ids (ownership.ts:396-402). | Warn (like the climb_sends orphan warning at :412-416) or reject entries whose routine_id is absent from the file. |
+| Low | apps/web/src/db/repos/routines.ts:286 | addEntry defaults order_index to 0, colliding with an existing first entry (create() defaults to the array index instead). | Default to max(live order_index) + 1 or document the follow-up reorder. |
+
+Check highlights (full table in the review response): atomicity, owner guards, softDelete
+cascade, schema v3 upgrade and indexes, pull order and transaction scope, backup optionality
+and re-stamping, isServerOwnedRow, ownership/adoption/wipe integration, Rust rules parity, and
+export_ts regen all PASS. Tests PASS with the F4 gap. Prose convention PASS.
+
+### Recurring patterns for other agents
+- Tombstone-state handling is a per-repo convention, not enforced by a shared helper: every
+  mutating repo function must decide what happens on an already-deleted row (activities and
+  workouts throw on update and no-op on delete). New repos should copy that explicitly and
+  test both paths, or the convention should be extracted into a shared guard.
+- Defensive branches whose type-level inputs shrank (isLocalEntity after the SyncEntity union
+  caught up with CLIENT_PULL_ORDER) still protect runtime wire data; keep a test that casts an
+  unknown value in, since the server, not the type system, drives pull rows.
+- Child entities without their own owner column (exercise_entries, routine_entries) rely on
+  parent-scoped ownership everywhere (guards, wipe, op cleanup); any new child table must
+  thread its parent id through all three, and backup parse should warn on orphans.

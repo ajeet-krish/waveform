@@ -14,6 +14,8 @@ const STORES = [
   "activities",
   "body_stats",
   "climb_sends",
+  "routines",
+  "routine_entries",
 ];
 
 const INDEXES: Record<string, { primary: string; secondary: string[] }> = {
@@ -28,6 +30,8 @@ const INDEXES: Record<string, { primary: string; secondary: string[] }> = {
   activities: { primary: "id", secondary: ["local_date", "type"] },
   body_stats: { primary: "id", secondary: ["local_date"] },
   climb_sends: { primary: "activity_id", secondary: [] },
+  routines: { primary: "id", secondary: ["user_id", "updated_at"] },
+  routine_entries: { primary: "id", secondary: ["routine_id", "exercise_id"] },
 };
 
 function storeNames(db: ReturnType<typeof createWaveformDb>): string[] {
@@ -35,7 +39,7 @@ function storeNames(db: ReturnType<typeof createWaveformDb>): string[] {
 }
 
 describe("WaveformDb schema", () => {
-  it("declares exactly the eleven version 2 stores with their indexes", async () => {
+  it("declares exactly the thirteen version 3 stores with their indexes", async () => {
     const db = createWaveformDb(`schema-stores-${crypto.randomUUID()}`);
     expect(storeNames(db)).toEqual(STORES);
     await db.open();
@@ -52,7 +56,7 @@ describe("WaveformDb schema", () => {
     db.close();
   });
 
-  it("opens version 2 twice without error and keeps its data", async () => {
+  it("opens version 3 twice without error and keeps its data", async () => {
     const db = createWaveformDb(`schema-open-twice-${crypto.randomUUID()}`);
     await db.open();
     await db.open();
@@ -66,8 +70,8 @@ describe("WaveformDb schema", () => {
     db.close();
   });
 
-  it("upgrades a version 1 database losslessly and adds the three new stores", async () => {
-    const name = `schema-upgrade-${crypto.randomUUID()}`;
+  it("upgrades a version 1 database losslessly and adds the five new stores", async () => {
+    const name = `schema-upgrade-v1-${crypto.randomUUID()}`;
 
     // Build a raw Dexie with ONLY the version 1 declaration, as an old
     // install would have it, and write two v1 rows.
@@ -108,7 +112,7 @@ describe("WaveformDb schema", () => {
     await v1.table("workout_sessions").put(sessionRow);
     v1.close();
 
-    // Reopen through WaveformDb: the v1 rows survive and the three new
+    // Reopen through WaveformDb: the v1 rows survive and the five new
     // stores exist and are empty.
     const db = createWaveformDb(name);
     await db.open();
@@ -118,6 +122,75 @@ describe("WaveformDb schema", () => {
     expect(await db.activities.count()).toBe(0);
     expect(await db.body_stats.count()).toBe(0);
     expect(await db.climb_sends.count()).toBe(0);
+    expect(await db.routines.count()).toBe(0);
+    expect(await db.routine_entries.count()).toBe(0);
+    db.close();
+  });
+
+  it("upgrades a version 2 database losslessly and adds the two routine stores", async () => {
+    const name = `schema-upgrade-v2-${crypto.randomUUID()}`;
+
+    // A v2 install as it existed before Phase 2.1: no routines stores.
+    const v2 = new Dexie(name);
+    v2.version(1).stores({
+      exercises: "id, owner_id",
+      workout_sessions: "id, local_date",
+      exercise_entries: "id, workout_id",
+      set_entries: "id, exercise_entry_id",
+      workout_drafts: "id",
+      outbox: "op_id, created_at",
+      local_profile: "id",
+      sync_meta: "key",
+    });
+    v2.version(2).stores({
+      exercises: "id, owner_id",
+      workout_sessions: "id, local_date",
+      exercise_entries: "id, workout_id",
+      set_entries: "id, exercise_entry_id",
+      workout_drafts: "id",
+      outbox: "op_id, created_at",
+      local_profile: "id",
+      sync_meta: "key",
+      activities: "id, local_date, type",
+      body_stats: "id, local_date",
+      climb_sends: "activity_id",
+    });
+    await v2.open();
+    const activityRow = {
+      id: "act-1",
+      user_id: "user-1",
+      type: "cycling",
+      local_date: "2026-10-13",
+      started_at: null,
+      duration_min: 45,
+      distance_km: 20,
+      elevation_m: null,
+      climb_grade: null,
+      climb_grade_value: null,
+      routes_sent: null,
+      notes: null,
+      created_at: "2026-10-13T00:00:00.000Z",
+      updated_at: "2026-10-13T00:00:00.000Z",
+      deleted_at: null,
+    };
+    const sendsRow = {
+      activity_id: "act-1",
+      counts: new Array<number>(17).fill(0),
+      updated_at: "2026-10-13T00:00:00.000Z",
+    };
+    await v2.table("activities").put(activityRow);
+    await v2.table("climb_sends").put(sendsRow);
+    v2.close();
+
+    // Reopen through WaveformDb (v3): the v2 rows survive and the two
+    // routine stores are added empty.
+    const db = createWaveformDb(name);
+    await db.open();
+    expect(storeNames(db)).toEqual(STORES);
+    expect(await db.activities.get("act-1")).toEqual(activityRow);
+    expect(await db.climb_sends.get("act-1")).toEqual(sendsRow);
+    expect(await db.routines.count()).toBe(0);
+    expect(await db.routine_entries.count()).toBe(0);
     db.close();
   });
 });

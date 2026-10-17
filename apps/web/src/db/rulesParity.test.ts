@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RULE_CONSTANTS } from "@waveform/api-types";
-import { ACTIVITY_RULES, BODY_RULES, SET_RULES } from "./validation";
+import { ACTIVITY_RULES, BODY_RULES, ROUTINE_RULES, SET_RULES } from "./validation";
 
 /**
  * Parity fence for the server-published rule tree: `RULE_CONSTANTS` is
@@ -20,6 +20,10 @@ describe("RULE_CONSTANTS parity with the client guards", () => {
 
   it("deep-equals BODY_RULES", () => {
     expect(RULE_CONSTANTS.body).toEqual({ ...BODY_RULES });
+  });
+
+  it("deep-equals ROUTINE_RULES", () => {
+    expect(RULE_CONSTANTS.routine).toEqual({ ...ROUTINE_RULES });
   });
 
   it("carries the push batch cap and pull page size", () => {
