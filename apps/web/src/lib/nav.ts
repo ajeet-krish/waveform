@@ -23,6 +23,7 @@ export const SECTIONS: readonly NavItem[] = [
   { label: "Workout", href: "/workout" },
   { label: "History", href: "/history" },
   { label: "Exercises", href: "/exercises" },
+  { label: "Routines", href: "/routines" },
   { label: "Activities", href: "/activities" },
   { label: "Body", href: "/body" },
   { label: "Social", href: "/social" },

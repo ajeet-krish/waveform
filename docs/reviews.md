@@ -1115,3 +1115,57 @@ export_ts regen all PASS. Tests PASS with the F4 gap. Prose convention PASS.
 - Child entities without their own owner column (exercise_entries, routine_entries) rely on
   parent-scoped ownership everywhere (guards, wipe, op cleanup); any new child table must
   thread its parent id through all three, and backup parse should warn on orphans.
+
+## 2026-10-16 - Tier 2.2 routines UI (code review)
+
+Verdict: PASS WITH ISSUES. Scope: uncommitted changes for Phase 2.2, the routines UI
+(apps/web only). NEW lib/routines.ts + routines.test.ts, routes/Routines.tsx,
+routes/RoutineDetail.tsx, components/routine/RoutineForm.tsx + RoutineSlotRow.tsx;
+changed db/types.ts (WorkoutDraftTarget, WorkoutDraftEntry.target), components/workout/
+ActiveSession.tsx, routes/HistoryDetail.tsx, routes/Workout.tsx, routes/Dashboard.tsx,
+lib/nav.ts + nav.test.ts, App.tsx, db/drafts.test.ts. Static review only, no shell.
+
+Core claims verified: seedDraftFromRoutine copies entries in order_index order with
+targets as a transient hint and stamps routine_id (routines.ts:54-79, tests :46-98);
+commit builds every row field by field so the hint reaches no row and no outbox payload
+(drafts.ts:86-141, drafts.test.ts:151-176); start-from-routine asks to replace an
+existing draft (RoutineDetail.tsx:179-199); moveSlot always sends an exact permutation
+of live entry ids (RoutineDetail.tsx:144-159 against the strict contract in
+repos/routines.ts:396-454); validators mirror ROUTINE_RULES and the routine_entries
+CHECK with kg conversion only at format boundaries (routines.ts:90-158, validation.ts:
+344-375); provenance is correct for live, tombstoned, and absent routines and hidden for
+routine-less sessions (routines.ts:29-40, HistoryDetail.tsx:117-125); routes registered
+(App.tsx:39-41) and the SECTIONS 7 to 8 change strengthens the nav tests without
+weakening the six-tab invariant (nav.test.ts:5-52); no `any`, effects cleaned up,
+createForm pattern followed. One High reactivity bug and one Medium desync issue.
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| High | components/routine/RoutineSlotRow.tsx:38-44, 58-92 with routes/RoutineDetail.tsx:276-289 | Per-position stale row state corrupts targets: `Index` keeps one instance per position while props.entry changes, the text signals never resync on move/remove, and the blur commit compares stale text to the NEW entry's values, so a plain blur silently overwrites the shifted row's targets. Same latent pattern as SetLog SetRow (:161-166) but reorder makes it the primary interaction. | Resync text and errors when props.entry.id at a position changes (lastId tracking or id-keyed effect); extract and test the resync. |
+| Medium | routes/RoutineDetail.tsx:144-159 | Rapid reorder clicks compute permutations from a stale live-query snapshot, so a second click re-sends the same swap and the move is lost; a Remove racing a Move makes reorderEntries reject (fails closed with a visible error). | Disable row actions while a reorder write is in flight, or track a local pending order. |
+| Low | routes/RoutineDetail.tsx:179-199 | Double-click "Start workout" with no existing draft seeds two drafts; the orphan lingers in workout_drafts and backups. | In-flight guard on the start handlers, or discard all non-current drafts in beginSession. |
+| Low | components/routine/RoutineSlotRow.tsx:193-203 | Visible "Up"/"Down" labels missing from the "Move X earlier/later" accessible names (WCAG 2.5.3 Label in Name). | Align visible text and aria-label. |
+| Low | routes/RoutineDetail.tsx:26, 42 | Display unit captured once at editor mount; a settings change leaves the weight column and parser in the old unit. | Pass unit as an accessor. |
+| Low | routes/RoutineDetail.tsx:222-226 | "Start workout" enabled for a routine with zero planned exercises, seeding a draft indistinguishable from Start empty session. | Disable until at least one entry exists. |
+| Low | routes/Routines.tsx:38-48 | N+1 getWithEntries per routine inside one live query (correct, just chatty). | Optional bulk entry read grouped by routine_id. |
+| Low | lib/routines.test.ts:149 | lb conversion pinned with toBeCloseTo(99.79, 1) where toKg rounds to exactly 99.79; weight boundary cases at 1500 and 0.01 lb untested. | Pin toBe(99.79) and add the boundary cases. |
+
+Check highlights (full table in the review response): start-from-routine seeding and
+no-leak proof, commit routine_id stamping, replace-draft confirm, reorder permutation
+parity with the Tier 2.1 contract, validation parity with ROUTINE_RULES and the SQL
+CHECK, unit conversion boundaries, provenance matrix, nav/route registration and the
+six-tab invariant, SolidJS hygiene, design-system copy, and helper test coverage all
+PASS except the row-state reactivity item above.
+
+### Recurring patterns for other agents
+- Positional lists (`Index`) with per-row local form state are the third occurrence of a
+  stale-row hazard in this codebase (SetLog SetRow, now RoutineSlotRow). Any list whose
+  rows reorder or shift must resync local state when the item id at a position changes,
+  or key rows by id. Consider extracting a shared resync helper before Phase 3 adds more
+  editable tables.
+- Async repo writes plus live queries create a read-check-write race window in every
+  reorder or bulk-mutate UI: either disable the controls while a write is in flight or
+  keep a local pending order. Strict repo guards (permutation checks) make the failure
+  mode safe but user-visible as "could not be saved".
+- Confirm-then-replace flows that read `current()` then act need an in-flight guard;
+  double clicks pass the existence check twice and leave orphan local rows.

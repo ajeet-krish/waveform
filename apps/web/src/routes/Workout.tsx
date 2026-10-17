@@ -265,6 +265,7 @@ function StartCard(props: { onStart(): void }): JSX.Element {
         body="Start an empty session and log sets as you go. Everything stays on this device until you finish, then it lands in your history."
         actions={[
           { label: "Start empty session", onClick: props.onStart, variant: "primary" },
+          { label: "Start from a routine", href: "/routines", variant: "secondary" },
         ]}
         note="e1RM uses the Brzycki formula, weight divided by (1.0278 minus 0.0278 times reps), and is labeled e1RM (Brzycki) wherever it appears"
       />

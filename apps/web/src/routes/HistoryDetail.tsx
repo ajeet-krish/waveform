@@ -19,6 +19,7 @@ import {
   type WeightUnit,
 } from "../lib/format";
 import { summarizeSession } from "../lib/history";
+import { routineProvenance } from "../lib/routines";
 import { bestE1rm } from "../lib/workoutLog";
 import { createToday } from "../lib/today";
 
@@ -113,6 +114,15 @@ function SessionBody(props: {
 
   const session = () => props.tree.session;
   const summary = createMemo(() => summarizeSession(props.tree, new Map()));
+  const routines = createLocalQuery(() => props.repos.routines.listLive());
+  // A live routine names the session; a tombstoned or missing one reads as
+  // "Deleted routine", and a session with no routine id shows nothing.
+  const provenance = createMemo(() =>
+    routineProvenance(
+      session().routine_id,
+      (routines.latest() ?? []).find((routine) => routine.id === session().routine_id),
+    ),
+  );
   const started = (): string => {
     const at = session().started_at;
     return at ? formatTime(at) : "n/a";
@@ -139,6 +149,10 @@ function SessionBody(props: {
         title={formatDayHeading(session().local_date, props.today)}
         lede={`Started ${started()} · ${formatDurationMin(session().duration_min)} · ${summary().exerciseCount} exercises`}
       />
+
+      <Show when={provenance()}>
+        <p class="panel-note">{`Routine: ${provenance()}`}</p>
+      </Show>
 
       <Panel label="Session totals">
         <dl class="stat-list">

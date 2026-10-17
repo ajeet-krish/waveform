@@ -147,4 +147,31 @@ describe("drafts commit", () => {
     expect(await db.outbox.count()).toBe(0);
     expect(await db.workout_sessions.count()).toBe(0);
   });
+
+  it("stamps the routine id on the session and keeps target hints off the rows", async () => {
+    const { db, repos } = harness("routine");
+    const draft = makeDraft({ routine_id: "routine-9" });
+    const first = draft.entries[0];
+    expect(first).toBeDefined();
+    if (!first) {
+      return;
+    }
+    first.target = { sets: 5, reps: 5, weight_kg: 80 };
+    await repos.drafts.save(draft);
+
+    await repos.drafts.commit(draft.id);
+
+    const session = await db.workout_sessions.get(draft.id);
+    expect(session?.routine_id).toBe("routine-9");
+
+    const entry = await db.exercise_entries.get(first.id);
+    expect(entry).toBeDefined();
+    // A target hint is a plan, never a stored column.
+    expect(entry).not.toHaveProperty("target");
+    const entryOps = (await db.outbox.toArray()).filter(
+      (op) => op.entity === "exercise_entries",
+    );
+    expect(entryOps).toHaveLength(2);
+    expect(entryOps.every((op) => !("target" in op.payload))).toBe(true);
+  });
 });

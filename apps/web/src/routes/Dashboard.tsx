@@ -43,6 +43,9 @@ export default function Dashboard(): JSX.Element {
         <A class="btn btn-primary" href="/workout">
           Start a session
         </A>
+        <A class="btn btn-secondary" href="/routines">
+          Routines
+        </A>
         <A class="btn btn-secondary" href="/activities/cycling">
           Log a ride
         </A>

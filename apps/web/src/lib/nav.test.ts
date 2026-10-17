@@ -29,15 +29,26 @@ describe("nav model", () => {
     expect(Object.keys(TAB_ICONS)).toHaveLength(TABS.length);
   });
 
-  it("desktop sections are the tabs plus Activities", () => {
-    expect(SECTIONS).toHaveLength(7);
+  it("desktop sections are the tabs plus Activities and Routines", () => {
+    expect(SECTIONS).toHaveLength(8);
     const sectionHrefs = SECTIONS.map((section) => section.href);
     for (const tab of TABS) {
       expect(sectionHrefs).toContain(tab.href);
     }
     expect(sectionHrefs).toContain("/activities");
-    // Activities is a section but never a bottom tab.
+    expect(sectionHrefs).toContain("/routines");
+    // Activities and Routines are sections but never bottom tabs.
     expect(TABS.map((tab) => tab.href)).not.toContain("/activities");
+    expect(TABS.map((tab) => tab.href)).not.toContain("/routines");
+  });
+
+  it("lists Routines once, as a training section with a reachable path", () => {
+    const routines = SECTIONS.filter((section) => section.href === "/routines");
+    expect(routines).toHaveLength(1);
+    expect(routines[0]?.label).toBe("Routines");
+    // A section without a route would be a dead link; the editor hangs off it.
+    expect(routines[0]?.end).toBeUndefined();
+    expect(isActivePath({ label: "Routines", href: "/routines" }, "/routines/abc")).toBe(true);
   });
 });
 

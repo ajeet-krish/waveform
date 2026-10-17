@@ -111,12 +111,25 @@ export type WorkoutDraftSet = {
   is_warmup: boolean;
 };
 
+/**
+ * A planned target carried into a draft from a routine. It is a hint the
+ * logger shows, never a logged set: nothing here is committed, and a
+ * session still stores only the sets the lifter actually performed.
+ */
+export type WorkoutDraftTarget = {
+  sets: number;
+  reps: number;
+  weight_kg: number | null;
+};
+
 /** One exercise slot inside an unsaved workout draft. */
 export type WorkoutDraftEntry = {
   id: string;
   exercise_id: string;
   order_index: number;
   notes: string | null;
+  /** Routine target hint; absent for an exercise added mid-session. */
+  target?: WorkoutDraftTarget | null;
   sets: WorkoutDraftSet[];
 };
 

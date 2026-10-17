@@ -1,7 +1,8 @@
 import { e1rmBrzycki } from "@waveform/scoring";
-import { createUniqueId, createSignal, Index, Show } from "solid-js";
+import { createEffect, createUniqueId, createSignal, Index, Show } from "solid-js";
 import { SET_RULES } from "../../db/validation";
 import { formatE1rm, toDisplayWeight, type WeightUnit } from "../../lib/format";
+import { createIdChangeTracker } from "../../lib/rowResync";
 import { parseRepsInput, parseSetInput, parseWeightInput, weightInputBounds } from "../../lib/setInput";
 import type { DraftSetInput } from "../../lib/workoutLog";
 import type { WorkoutDraftEntry, WorkoutDraftSet } from "../../db/types";
@@ -155,7 +156,8 @@ function SetRow(props: {
   onUpdate(patch: SetLogPatch): void;
   onRemove(): void;
 }) {
-  const label = `Set ${props.set.set_index + 1}`;
+  // Reactive so a removed set renumbers the rows below it.
+  const label = (): string => `Set ${props.set.set_index + 1}`;
   const weightHintId = createUniqueId();
   const repsHintId = createUniqueId();
   const [weightText, setWeightText] = createSignal(
@@ -164,6 +166,21 @@ function SetRow(props: {
   const [repsText, setRepsText] = createSignal(String(props.set.reps));
   const [weightError, setWeightError] = createSignal<string | null>(null);
   const [repsError, setRepsError] = createSignal<string | null>(null);
+
+  // `<Index>` reuses this instance per position, so removing a set shifts
+  // the next one under it. Resync the raw text and errors from the set now
+  // at this position, or a blur would commit the old set's values.
+  const tracker = createIdChangeTracker(props.set.id);
+  createEffect(() => {
+    const set = props.set;
+    if (!tracker.isNew(set.id)) {
+      return;
+    }
+    setWeightText(String(toDisplayWeight(set.weight_kg, props.unit)));
+    setRepsText(String(set.reps));
+    setWeightError(null);
+    setRepsError(null);
+  });
 
   const onWeightInput = (text: string): void => {
     setWeightText(text);
@@ -210,7 +227,7 @@ function SetRow(props: {
           step="any"
           min={weightInputBounds(props.unit).min}
           max={weightInputBounds(props.unit).max}
-          aria-label={`${label} weight in ${props.unit}`}
+          aria-label={`${label()} weight in ${props.unit}`}
           aria-invalid={weightError() ? "true" : undefined}
           aria-describedby={weightError() ? weightHintId : undefined}
           value={weightText()}
@@ -231,7 +248,7 @@ function SetRow(props: {
           step="1"
           min={SET_RULES.repsMin}
           max={SET_RULES.repsMax}
-          aria-label={`${label} reps`}
+          aria-label={`${label()} reps`}
           aria-invalid={repsError() ? "true" : undefined}
           aria-describedby={repsError() ? repsHintId : undefined}
           value={repsText()}
@@ -248,7 +265,7 @@ function SetRow(props: {
         <input
           class="input-check"
           type="checkbox"
-          aria-label={`${label} warmup`}
+          aria-label={`${label()} warmup`}
           checked={props.set.is_warmup}
           onChange={(event) => props.onUpdate({ is_warmup: event.currentTarget.checked })}
         />
@@ -261,7 +278,7 @@ function SetRow(props: {
           <button
             type="button"
             class="btn btn-quiet"
-            aria-label={`Remove ${label}`}
+            aria-label={`Remove ${label()}`}
             onClick={props.onRemove}
           >
             Remove

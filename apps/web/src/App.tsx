@@ -15,6 +15,8 @@ import HistoryDetail from "./routes/HistoryDetail";
 import Leaderboard from "./routes/Leaderboard";
 import NotFound from "./routes/NotFound";
 import Profile from "./routes/Profile";
+import RoutineDetail from "./routes/RoutineDetail";
+import Routines from "./routes/Routines";
 import Setup from "./routes/Setup";
 import SocialLayout from "./routes/SocialLayout";
 import Workout from "./routes/Workout";
@@ -34,6 +36,9 @@ export default function App() {
       <Route path="/history/:id" component={HistoryDetail} />
       <Route path="/exercises" component={Exercises} />
       <Route path="/exercises/:id" component={ExerciseHistory} />
+      <Route path="/routines" component={Routines} />
+      <Route path="/routines/new" component={RoutineDetail} />
+      <Route path="/routines/:id" component={RoutineDetail} />
       <Route path="/activities" component={Activities} />
       <Route path="/activities/cycling" component={Cycling} />
       <Route path="/activities/climbing" component={Climbing} />

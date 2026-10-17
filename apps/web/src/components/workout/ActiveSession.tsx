@@ -3,6 +3,7 @@ import { createSignal, Index, Show } from "solid-js";
 import type { Repos } from "../../db";
 import type { WorkoutDraft, WorkoutDraftSet } from "../../db/types";
 import { formatE1rm, formatTime, formatWeight, type WeightUnit } from "../../lib/format";
+import { formatTargetHint } from "../../lib/routines";
 import {
   addExerciseToDraft,
   addSetToDraft,
@@ -80,20 +81,27 @@ export default function ActiveSession(props: {
               <span class="panel-meta">{`Best e1RM (Brzycki): ${bestLabel(entry().sets)}`}</span>
             </div>
             <div class="panel-body">
-              <SetLog
-                entry={entry()}
-                exerciseName={props.exerciseName(entry().exercise_id)}
-                unit={props.unit}
-                onAddSet={(input: DraftSetInput) =>
-                  props.mutate((draft) => addSetToDraft(draft, entry().id, input))
-                }
-                onUpdateSet={(setId: string, patch: SetLogPatch) =>
-                  props.mutate((draft) => updateSetInDraft(draft, setId, patch))
-                }
-                onRemoveSet={(setId: string) =>
-                  props.mutate((draft) => removeSetFromDraft(draft, setId))
-                }
-              />
+              <div class="stack-tight">
+                <Show when={entry().target}>
+                  {(target) => (
+                    <p class="panel-note">{`Target: ${formatTargetHint(target(), props.unit)}`}</p>
+                  )}
+                </Show>
+                <SetLog
+                  entry={entry()}
+                  exerciseName={props.exerciseName(entry().exercise_id)}
+                  unit={props.unit}
+                  onAddSet={(input: DraftSetInput) =>
+                    props.mutate((draft) => addSetToDraft(draft, entry().id, input))
+                  }
+                  onUpdateSet={(setId: string, patch: SetLogPatch) =>
+                    props.mutate((draft) => updateSetInDraft(draft, setId, patch))
+                  }
+                  onRemoveSet={(setId: string) =>
+                    props.mutate((draft) => removeSetFromDraft(draft, setId))
+                  }
+                />
+              </div>
               <div class="form-actions mt-4">
                 <button
                   type="button"
