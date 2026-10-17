@@ -1,6 +1,6 @@
 /**
- * Activity repository: cycling and climbing sessions plus the
- * device-local climb_sends histogram.
+ * Activity repository: cycling, climbing, running, hike, and swim
+ * sessions plus the device-local climb_sends histogram.
  *
  * Transactional contract, same as the workout repo: every mutating
  * function performs all of its row writes AND all of its outbox appends
@@ -13,8 +13,8 @@
  *
  * Climbing derivation lives in `toClimbFields`: the histogram's hardest
  * sent grade becomes climb_grade ("V5") and climb_grade_value (5), and
- * the histogram's total becomes routes_sent. Cycling rows keep those
- * columns null and never write a climb_sends row.
+ * the histogram's total becomes routes_sent. Cycling, running, hike, and
+ * swim rows keep those columns null and never write a climb_sends row.
  */
 
 import type { Activity, ActivityType } from "@waveform/api-types";
@@ -35,8 +35,8 @@ export type ClimbLogInput = {
   sends: readonly number[];
 };
 
-export type RideLogInput = {
-  type: "cycling";
+export type EnduranceLogInput = {
+  type: "cycling" | "running" | "hike" | "swim";
   local_date: string;
   started_at?: string | null;
   duration_min?: number | null;
@@ -45,7 +45,7 @@ export type RideLogInput = {
   notes?: string | null;
 };
 
-export type ActivityLogInput = ClimbLogInput | RideLogInput;
+export type ActivityLogInput = ClimbLogInput | EnduranceLogInput;
 
 export type ActivityPatch = {
   local_date?: string;
@@ -97,10 +97,11 @@ export type ClimbLog = {
 
 export type ActivityRepo = {
   /**
-   * Logs one cycling or climbing session. Climbing derives its summary
-   * columns from `sends`, writes the histogram row, and queues one
-   * create op whose payload is the activity row exactly as the backend
-   * expects (no sends field). Cycling keeps the climb columns null.
+   * Logs one activity: cycling, running, hike, swim, or climbing.
+   * Climbing derives its summary columns from `sends`, writes the
+   * histogram row, and queues one create op whose payload is the activity
+   * row exactly as the backend expects (no sends field). Endurance types
+   * keep the climb columns null and store their distance and elevation.
    */
   logActivity(input: ActivityLogInput): Promise<ActivityMutation>;
   /**
@@ -154,8 +155,8 @@ export function createActivityRepo(db: WaveformDb, deps: RepoDeps): ActivityRepo
         local_date: input.local_date,
         started_at: input.started_at ?? null,
         duration_min: input.duration_min ?? null,
-        distance_km: isClimb ? null : ((input as RideLogInput).distance_km ?? null),
-        elevation_m: isClimb ? null : ((input as RideLogInput).elevation_m ?? null),
+        distance_km: isClimb ? null : ((input as EnduranceLogInput).distance_km ?? null),
+        elevation_m: isClimb ? null : ((input as EnduranceLogInput).elevation_m ?? null),
         climb_grade: climb.climb_grade,
         climb_grade_value: climb.climb_grade_value,
         routes_sent: climb.routes_sent,

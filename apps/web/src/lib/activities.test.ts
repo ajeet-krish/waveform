@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DISCIPLINES, summarizeDiscipline, type DisciplineActivity } from "./activities";
+import {
+  DISCIPLINES,
+  disciplineForActivityType,
+  summarizeDiscipline,
+  type DisciplineActivity,
+} from "./activities";
 import type { Activity } from "../types/api";
 
 /** The activity types the schema CHECK constraint accepts (0001_init.sql). */
@@ -11,16 +16,30 @@ describe("discipline cards", () => {
     expect(types).toEqual([...SCHEMA_ACTIVITY_TYPES].sort());
   });
 
-  it("links only the two discipline pages that ship first", () => {
+  it("links every discipline page", () => {
     const linked = DISCIPLINES.filter((card) => card.href !== undefined).map(
       (card) => card.type,
     );
-    expect(linked).toEqual(["cycling", "climbing"]);
+    expect(linked.sort()).toEqual([...SCHEMA_ACTIVITY_TYPES].sort());
+  });
+
+  it("leaves no discipline pending", () => {
+    expect(DISCIPLINES.filter((card) => card.pending === true)).toEqual([]);
   });
 
   it("keeps labels unique so the cards render distinctly", () => {
     const labels = DISCIPLINES.map((card) => card.label);
     expect(new Set(labels).size).toBe(labels.length);
+  });
+});
+
+describe("disciplineForActivityType", () => {
+  it("maps each activity type to its Effort Points discipline", () => {
+    expect(disciplineForActivityType("climbing")).toBe("climbing");
+    expect(disciplineForActivityType("cycling")).toBe("cycling");
+    expect(disciplineForActivityType("running")).toBe("run");
+    expect(disciplineForActivityType("hike")).toBe("hike");
+    expect(disciplineForActivityType("swim")).toBe("swim");
   });
 });
 
@@ -58,6 +77,17 @@ describe("summarizeDiscipline", () => {
     ];
     const summary = summarizeDiscipline("cycling", activities, "2026-10-01", "2026-10-31");
     expect(summary).toEqual({ type: "cycling", count: 2, totalKm: 42.5, totalVPoints: 0 });
+  });
+
+  it("totals running distance in km across the window", () => {
+    const activities = [
+      activity({ type: "running", local_date: "2026-10-10", distance_km: 5 }),
+      activity({ type: "running", local_date: "2026-10-14", distance_km: 10.5 }),
+      // A hike in the window is a different type and must not leak in.
+      activity({ type: "hike", local_date: "2026-10-14", distance_km: 8 }),
+    ];
+    const summary = summarizeDiscipline("running", activities, "2026-10-01", "2026-10-31");
+    expect(summary).toEqual({ type: "running", count: 2, totalKm: 15.5, totalVPoints: 0 });
   });
 
   it("totals climbing V-points via vPointsForSends", () => {

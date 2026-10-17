@@ -17,6 +17,7 @@ import {
   createForm,
   createNumberField,
   createRepsField,
+  createRequiredDurationField,
   createTextField,
   createWeightField,
 } from "./forms";
@@ -145,6 +146,27 @@ describe("optional number fields map empty input to null", () => {
     }
   });
 
+  it("assertValidActivity rejects negative distance and elevation", () => {
+    const base = {
+      local_date: "2026-10-14",
+      duration_min: 30,
+      climb_grade_value: null,
+      routes_sent: null,
+    };
+    expect(() =>
+      assertValidActivity({ ...base, distance_km: 0, elevation_m: 0 }),
+    ).not.toThrow();
+    expect(() =>
+      assertValidActivity({ ...base, distance_km: -1, elevation_m: null }),
+    ).toThrow(/distance_km/);
+    expect(() =>
+      assertValidActivity({ ...base, distance_km: null, elevation_m: -5 }),
+    ).toThrow(/elevation_m/);
+    expect(() =>
+      assertValidActivity({ ...base, distance_km: Number.NaN, elevation_m: null }),
+    ).toThrow(/distance_km/);
+  });
+
   it("createBodyWeightField mirrors BODY_RULES: strictly positive and at most 1500", () => {
     expect(BODY_RULES).toEqual({
       weightMinKgExclusive: 0,
@@ -183,6 +205,31 @@ describe("optional number fields map empty input to null", () => {
       expect(field.validate(Number.NaN)).not.toBeNull();
       expect(field.validate(Number.POSITIVE_INFINITY)).not.toBeNull();
     }
+  });
+
+  it("createDistanceKmField and createElevationField reject negatives", () => {
+    const distance = createDistanceKmField();
+    const elevation = createElevationField();
+    for (const field of [distance, elevation]) {
+      expect(field.validate(-0.1)).toBe("Enter 0 or more.");
+      expect(field.validate(-500)).toBe("Enter 0 or more.");
+      expect(field.validate(0)).toBeNull();
+    }
+    // Circumference stays signed: a finite negative is not the shared rule.
+    expect(createCircumferenceField().validate(-1)).toBeNull();
+  });
+
+  it("createRequiredDurationField rejects an empty box but keeps the duration bounds", () => {
+    const field = createRequiredDurationField();
+    expect(field.validate(null)).toBe("Enter the duration in minutes.");
+    expect(field.validate(0)).toBeNull();
+    expect(field.validate(45)).toBeNull();
+    expect(field.validate(1440)).toBeNull();
+    expect(field.validate(1441)).not.toBeNull();
+    expect(field.validate(1.5)).not.toBeNull();
+    // Empty raw input cleans to null, which the required wrapper rejects.
+    expect(field.validate(field.clean?.("") ?? null)).toBe("Enter the duration in minutes.");
+    expect(field.validate(field.clean?.("45") ?? null)).toBeNull();
   });
 
   it("hands cleaned nullable numbers to a form submit", async () => {

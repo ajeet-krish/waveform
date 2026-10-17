@@ -12,13 +12,16 @@ import Feed from "./routes/Feed";
 import Heatmap from "./routes/Heatmap";
 import History from "./routes/History";
 import HistoryDetail from "./routes/HistoryDetail";
+import Hikes from "./routes/Hikes";
 import Leaderboard from "./routes/Leaderboard";
 import NotFound from "./routes/NotFound";
 import Profile from "./routes/Profile";
 import RoutineDetail from "./routes/RoutineDetail";
 import Routines from "./routes/Routines";
+import Running from "./routes/Running";
 import Setup from "./routes/Setup";
 import SocialLayout from "./routes/SocialLayout";
+import Swims from "./routes/Swims";
 import Workout from "./routes/Workout";
 
 // Vite's BASE_URL always ends with "/", but the router's base must not: a
@@ -42,6 +45,9 @@ export default function App() {
       <Route path="/activities" component={Activities} />
       <Route path="/activities/cycling" component={Cycling} />
       <Route path="/activities/climbing" component={Climbing} />
+      <Route path="/activities/running" component={Running} />
+      <Route path="/activities/hike" component={Hikes} />
+      <Route path="/activities/swim" component={Swims} />
       <Route path="/body" component={Body} />
       <Route component={SocialLayout}>
         <Route path="/social" component={() => <Navigate href="/social/leaderboard" />} />

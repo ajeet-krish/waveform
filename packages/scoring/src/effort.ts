@@ -6,14 +6,18 @@
  * heatmap currency only and never a ranked leaderboard board.
  */
 
-/** Lifting, climbing, and cycling weight minutes differently. */
-export type Discipline = "strength" | "climbing" | "cycling";
+/** Lifting, climbing, cycling, running, hiking, and swimming weight minutes
+ * differently. */
+export type Discipline = "strength" | "climbing" | "cycling" | "run" | "hike" | "swim";
 
 /** Minutes-to-EP intensity per discipline. */
 const INTENSITY_BY_DISCIPLINE: Readonly<Record<Discipline, number>> = {
   strength: 1.0,
   climbing: 1.1,
   cycling: 0.9,
+  run: 1.0,
+  hike: 0.7,
+  swim: 1.0,
 };
 
 /** Minutes-to-EP intensity for this discipline. */
@@ -21,10 +25,14 @@ export function disciplineIntensity(discipline: Discipline): number {
   return INTENSITY_BY_DISCIPLINE[discipline];
 }
 
+/** The known discipline names, derived from the intensity table so a new
+ * discipline needs one edit. */
+const DISCIPLINE_NAMES: ReadonlySet<string> = new Set(Object.keys(INTENSITY_BY_DISCIPLINE));
+
 /** Parse a raw discipline string; unknown values throw loudly. */
 export function parseDiscipline(raw: string): Discipline {
-  if (raw === "strength" || raw === "climbing" || raw === "cycling") {
-    return raw;
+  if (DISCIPLINE_NAMES.has(raw)) {
+    return raw as Discipline;
   }
   throw new Error(`unknown discipline: ${raw}`);
 }
@@ -36,7 +44,7 @@ export interface EffortBonuses {
   prCount: number;
   /** Climbing routes sent during the session. */
   sends: number;
-  /** Elevation gained, in meters (cycling and hiking). */
+  /** Elevation gained, in meters (cycling, running, and hiking). */
   elevationM: number;
 }
 
@@ -68,12 +76,22 @@ const EP_ELEVATION_CAP = 15.0;
 /** Hard daily cap on total Effort Points. */
 export const DAILY_EP_CAP = 100.0;
 
+/**
+ * A non-negative clamp that agrees with Rust's `f64::max(value, 0.0)`:
+ * NaN counts as 0, while infinity passes through. `Math.max(NaN, 0)` is
+ * NaN in JS but 0 in Rust, so the explicit NaN check keeps the two
+ * implementations equal.
+ */
+function clampNonNegative(value: number): number {
+  return Number.isNaN(value) ? 0.0 : Math.max(value, 0.0);
+}
+
 /** Bounded bonus EP for these bonuses. */
 function bonusEffortPoints(bonuses: EffortBonuses): number {
   const prEp = bonuses.prCount * EP_PER_PR;
   const sendEp = bonuses.sends * EP_PER_SEND;
   const elevationEp =
-    (Math.max(bonuses.elevationM, 0.0) / 100.0) * EP_PER_ELEVATION_100M;
+    (clampNonNegative(bonuses.elevationM) / 100.0) * EP_PER_ELEVATION_100M;
   return (
     Math.min(prEp, EP_PR_CAP) +
     Math.min(sendEp, EP_SEND_CAP) +
@@ -84,15 +102,15 @@ function bonusEffortPoints(bonuses: EffortBonuses): number {
 /**
  * Effort Points for one session, before the daily cap.
  *
- * Minutes below zero are treated as zero. Bonuses are individually bounded;
- * the aggregate daily cap is applied by [`effortPointsDaily`].
+ * Minutes below zero or NaN are treated as zero. Bonuses are individually
+ * bounded; the aggregate daily cap is applied by [`effortPointsDaily`].
  */
 export function effortPoints(
   minutes: number,
   discipline: Discipline,
   bonuses: EffortBonuses,
 ): number {
-  const base = Math.max(minutes, 0.0) * disciplineIntensity(discipline);
+  const base = clampNonNegative(minutes) * disciplineIntensity(discipline);
   return base + bonusEffortPoints(bonuses);
 }
 

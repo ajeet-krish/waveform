@@ -33,6 +33,9 @@ fn zero_minute_day_without_bonuses_scores_zero() {
         Discipline::Strength,
         Discipline::Climbing,
         Discipline::Cycling,
+        Discipline::Run,
+        Discipline::Hike,
+        Discipline::Swim,
     ] {
         assert_eq!(effort_points(0.0, discipline, &none), 0.0);
     }
@@ -60,6 +63,9 @@ fn per_discipline_intensity_weights_minutes() {
     assert_approx(effort_points(60.0, Discipline::Strength, &none), 60.0);
     assert_approx(effort_points(60.0, Discipline::Climbing, &none), 66.0);
     assert_approx(effort_points(60.0, Discipline::Cycling, &none), 54.0);
+    assert_approx(effort_points(60.0, Discipline::Run, &none), 60.0);
+    assert_approx(effort_points(60.0, Discipline::Hike, &none), 42.0);
+    assert_approx(effort_points(60.0, Discipline::Swim, &none), 60.0);
     // Fractional minutes pass through unrounded.
     assert_approx(effort_points(90.9, Discipline::Strength, &none), 90.9);
     assert_approx(effort_points(1.0, Discipline::Climbing, &none), 1.1);
@@ -136,6 +142,9 @@ fn effort_is_monotonic_in_minutes() {
         Discipline::Strength,
         Discipline::Climbing,
         Discipline::Cycling,
+        Discipline::Run,
+        Discipline::Hike,
+        Discipline::Swim,
     ] {
         let mut previous = effort_points(0.0, discipline, &none);
         for step in 1..=50 {
@@ -163,6 +172,30 @@ fn degenerate_inputs_clamp_to_zero() {
     assert_eq!(
         effort_points(30.0, Discipline::Cycling, &negative_elevation),
         27.0
+    );
+}
+
+#[test]
+fn nan_inputs_clamp_like_zero() {
+    // Rust f64::max(NaN, 0.0) is 0.0; the TS port mirrors this explicitly
+    // so both agree, fenced by the shared golden NaN vectors.
+    let none = EffortBonuses::default();
+    assert_eq!(effort_points(f64::NAN, Discipline::Strength, &none), 0.0);
+
+    let nan_elevation = EffortBonuses {
+        pr_count: 0,
+        sends: 0,
+        elevation_m: f64::NAN,
+    };
+    assert_approx(
+        effort_points(30.0, Discipline::Cycling, &nan_elevation),
+        27.0,
+    );
+
+    // Infinity still passes through, matching the TS clamp.
+    assert_eq!(
+        effort_points(f64::INFINITY, Discipline::Strength, &none),
+        f64::INFINITY
     );
 }
 
@@ -197,6 +230,9 @@ fn property_daily_total_never_leaves_the_0_to_100_band() {
             Discipline::Strength,
             Discipline::Climbing,
             Discipline::Cycling,
+            Discipline::Run,
+            Discipline::Hike,
+            Discipline::Swim,
         ] {
             for &sends in &[0_u32, 7, 500] {
                 let day = [

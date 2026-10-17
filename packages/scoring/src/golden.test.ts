@@ -76,12 +76,12 @@ describe("shared golden vectors", () => {
 
   it("matches effortPoints on every vector", () => {
     for (const vector of golden.effortPoints) {
+      const minutes = vector.minutesNaN ? Number.NaN : vector.minutes;
+      const bonuses = vector.elevationMNaN
+        ? { ...vector.bonuses, elevationM: Number.NaN }
+        : vector.bonuses;
       assertApprox(
-        effortPoints(
-          vector.minutes,
-          parseDiscipline(vector.discipline),
-          vector.bonuses,
-        ),
+        effortPoints(minutes, parseDiscipline(vector.discipline), bonuses),
         vector.expected,
         golden.tolerance,
       );

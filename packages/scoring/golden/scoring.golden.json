@@ -499,6 +499,68 @@
         "elevationM": 1000000.0
       },
       "expected": 15.0
+    },
+    {
+      "minutes": 60.0,
+      "discipline": "run",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 60.0
+    },
+    {
+      "minutes": 60.0,
+      "discipline": "hike",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 42.0
+    },
+    {
+      "minutes": 45.0,
+      "discipline": "swim",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 45.0
+    },
+    {
+      "minutes": 90.0,
+      "discipline": "hike",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 500.0
+      },
+      "expected": 68.0
+    },
+    {
+      "minutes": 0.0,
+      "minutesNaN": true,
+      "discipline": "strength",
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 0.0
+    },
+    {
+      "minutes": 30.0,
+      "discipline": "cycling",
+      "elevationMNaN": true,
+      "bonuses": {
+        "prCount": 0,
+        "sends": 0,
+        "elevationM": 0.0
+      },
+      "expected": 27.0
     }
   ],
   "effortPointsDaily": [
@@ -621,6 +683,38 @@
         }
       ],
       "expected": 36.0
+    },
+    {
+      "sessions": [
+        {
+          "minutes": 30.0,
+          "discipline": "run",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        },
+        {
+          "minutes": 30.0,
+          "discipline": "hike",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        },
+        {
+          "minutes": 20.0,
+          "discipline": "swim",
+          "bonuses": {
+            "prCount": 0,
+            "sends": 0,
+            "elevationM": 0.0
+          }
+        }
+      ],
+      "expected": 71.0
     }
   ]
 }

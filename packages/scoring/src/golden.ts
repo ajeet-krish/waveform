@@ -22,12 +22,18 @@ export interface TotalVPointsVector {
 
 /** One session Effort Points vector. Discipline is the raw string so the
  * golden file stays language neutral; callers parse it with
- * `parseDiscipline`. */
+ * `parseDiscipline`. JSON cannot carry NaN, so the optional `minutesNaN`
+ * and `elevationMNaN` flags stand in for a NaN minutes or bonus elevation
+ * and fence the JS/Rust clamp agreement. */
 export interface EffortPointsVector {
   minutes: number;
   discipline: string;
   bonuses: EffortBonuses;
   expected: number;
+  /** When true, `minutes` is replaced with NaN before scoring. */
+  minutesNaN?: boolean;
+  /** When true, `bonuses.elevationM` is replaced with NaN before scoring. */
+  elevationMNaN?: boolean;
 }
 
 /** One session entry inside a daily Effort Points vector. */

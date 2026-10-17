@@ -55,6 +55,12 @@ struct EffortPointsVector {
     discipline: String,
     bonuses: GoldenBonuses,
     expected: f64,
+    /// JSON cannot carry NaN, so these flags stand in for a NaN minutes or
+    /// bonus elevation and fence the JS/Rust clamp agreement.
+    #[serde(default)]
+    minutes_nan: bool,
+    #[serde(default)]
+    elevation_m_nan: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +122,9 @@ fn parse_discipline(raw: &str) -> Discipline {
         "strength" => Discipline::Strength,
         "climbing" => Discipline::Climbing,
         "cycling" => Discipline::Cycling,
+        "run" => Discipline::Run,
+        "hike" => Discipline::Hike,
+        "swim" => Discipline::Swim,
         other => panic!("unknown discipline in golden file: {other}"),
     }
 }
@@ -178,8 +187,17 @@ fn effort_points_vectors_match_the_rust_implementation() {
     let golden = load_golden();
     for vector in &golden.effort_points {
         let discipline = parse_discipline(&vector.discipline);
+        let minutes = if vector.minutes_nan {
+            f64::NAN
+        } else {
+            vector.minutes
+        };
+        let mut bonuses = vector.bonuses.to_bonuses();
+        if vector.elevation_m_nan {
+            bonuses.elevation_m = f64::NAN;
+        }
         assert_approx(
-            effort_points(vector.minutes, discipline, &vector.bonuses.to_bonuses()),
+            effort_points(minutes, discipline, &bonuses),
             vector.expected,
             golden.tolerance,
         );

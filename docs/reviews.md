@@ -1169,3 +1169,69 @@ PASS except the row-state reactivity item above.
   mode safe but user-visible as "could not be saved".
 - Confirm-then-replace flows that read `current()` then act need an in-flight guard;
   double clicks pass the existence check twice and leave orphan local rows.
+
+## 2026-10-16 - Tier 2.3 running/hike/swim and Effort Points (code review)
+
+Verdict: PASS WITH ISSUES. Scope: uncommitted changes for Phase 2.3, run/hike/swim logging
+and the Effort Points discipline extension. Rust (crates/scoring/src/effort.rs,
+crates/scoring/tests/{effort_domain.rs, golden.rs}), TypeScript scoring
+(packages/scoring/src/{effort.ts, effort.test.ts}, golden/scoring.golden.json), and web
+(apps/web: lib/activities.ts, lib/activitySummary.ts, NEW components/activity/
+EnduranceForm.tsx, NEW routes/{Running,Hikes,Swims}.tsx, App.tsx, routes/Activities.tsx,
+components/activity/ActivityCard.tsx, db/repos/activities.ts). Static review only, no shell.
+
+Core claims verified: Discipline::Run 1.0, Hike 0.7, Swim 1.0 are byte-identical to the TS
+INTENSITY map (effort.rs:29-38 vs effort.ts:14-21), fenced by shared golden vectors that
+exercise run (scoring.golden.json:503-512), hike plain and with elevation (:513-522, :533-542,
+68 EP = 0.7*90 + 5), swim (:523-532), and a mixed run/hike/swim daily vector (:665-696, 71 EP);
+both suites run the same file (golden.rs:15 include_str, golden.ts:1 import) so any intensity
+divergence fails the divergent side; parse arms are identical and loud on unknown
+(golden.rs:114-124, effort.ts:29-41); adding the variants changes no existing intensity,
+bonus, or cap math (bonuses are discipline-agnostic in both languages, effort.rs:82-107,
+effort.ts:82-108). EnduranceForm requires duration mirroring ACTIVITY_RULES 0..1440 integer
+(EnduranceForm.tsx:76-85, forms.ts:194-204), hides and nulls elevation for swim (:72, :102),
+and rejects negative distance/elevation (:49-61). EnduranceLogInput covers cycling, running,
+hike, swim (repos/activities.ts:38-46) and logActivity writes null climb columns and no
+climb_sends row for them (:148-175), proven at repos/activities.test.ts:140-164.
+endurancePace never divides by zero and is per km or per 100 m (activitySummary.ts:62-79,
+zero-distance case tested at activitySummary.test.ts:49-54, :70-72). Routes
+/activities/running, /activities/hike, /activities/swim are registered (App.tsx:48-50) and
+match the card hrefs (activities.ts:37, 43, 51); `pending` is dead but harmless and pinned
+by test (activities.test.ts:26-28). Tests cover both scoring suites, the type-to-discipline
+mapping, summaries including zero-distance, and repo row shape; the changed window-summary
+tests (activitySummary.test.ts:101-130) are additive across every live branch and no
+weakening is evident, though the replaced test could not be diffed without a shell.
+
+| Severity | File:Line | Issue | Fix |
+|----------|-----------|-------|-----|
+| Medium | apps/web/src/components/activity/ActivityCard.tsx:44-56; lib/activitySummary.ts:20-23 | Hike cards never show logged elevation: EnduranceFigures carries only distance and duration, yet the form captures elevation, the hike blurb promises it (activities.ts:42-47 "Distance, elevation, and time on foot"), and ride cards do show it. A hike summary reads "1 h 20 min, 12.5 km, 6:24 /km" with the logged ascent invisible. | Add elevationM to EnduranceFigures and speak it in enduranceSummary (or rideSummary-style) for hike and run, or drop elevation from the hike blurb and form. |
+| Medium | apps/web/src/components/activity/EnduranceForm.tsx:49-61 vs components/activity/RideForm.tsx:31-32; db/validation.ts:232-237 | Non-negative distance/elevation exists only in EnduranceForm. RideForm, assertValidActivity (finite only), and the SQL (no CHECK on distance_km/elevation_m) all accept negatives, so the sibling forms disagree and a negative ride distance still writes. | Move nonNegative into createDistanceKmField/createElevationField (or shared builders) so all forms agree, and add repo-guard bounds plus a CHECK in a later migration if the server should reject them. |
+| Low | apps/web/src/components/activity/EnduranceForm.tsx:74-85 | Duration is required even on edit while the column is nullable, so a legacy null-duration endurance row (sync or backup import) cannot be edited without inventing a duration. Every other surface treats null duration benignly, and RideForm keeps it nullable. Acceptable as a product stance ("no time on the clock is not a session") but the form cannot round-trip a row unchanged. | Require duration on create only and allow null on edit, or keep and document the divergence in the repo and schema comments. |
+| Low | apps/web/src/components/activity/EnduranceForm.tsx:102, 108 | Editing a foreign swim row with a non-null elevation_m silently clears it (elevation forced null on save). Intended per "swim hides elevation", but it is a silent data clear on imported data. | Acceptable; optionally surface a hint when initial.elevation_m is non-null on a swim. |
+| Low | packages/scoring/src/effort.ts:29-41 | parseDiscipline is a hand-written if-chain parallel to INTENSITY_BY_DISCIPLINE, so a new discipline needs two TS edits (map plus parser) with the type system covering only one. | Derive membership from Object.keys(INTENSITY_BY_DISCIPLINE) so one table drives both. |
+| Low | crates/scoring/src/effort.rs:105 vs packages/scoring/src/effort.ts:106 | Pre-existing NaN drift: Rust f64::max(NaN, 0.0) is 0.0 but JS Math.max(NaN, 0.0) is NaN, so effort_points and effortPoints disagree on NaN minutes. No golden vector exercises NaN. | Add a NaN-minute golden vector with a defined expected value (0.0), or document the exclusion. |
+| Low | apps/web/src/components/activity/EnduranceForm.tsx:49-61, 77-85 | The nonNegative wrapper and the required-duration wrapper are inline in the component and untested (no component test suite here). | Extract both into lib/forms.ts as reusable field wrappers and unit test them. |
+| Low | apps/web/src/lib/activitySummary.ts:132-151 | A window with sessions but no distance reads "1 session, 0.0 km in the last 30 days."; the line 150 fallback is unreachable given the ActivityType union (all five types covered above it) and untested. | Fall back to sessions-only text when totalKm is 0 and no row carried distance; drop or test the dead branch. |
+| Info | apps/web/src/routes/Activities.tsx:80-82, 95, 105; lib/activities.ts:16 | `pending` handling is dead (no card sets it) but harmless and pinned by activities.test.ts:26-28; CSS .is-pending remains. | Remove DisciplineCard.pending and the branches in a cleanup pass, or keep the pin as the guard. |
+| Info | crates/scoring/src/effort.rs:49-50; packages/scoring/src/effort.ts:50-51 | EffortBonuses.elevation_m doc says "(cycling and hiking)" but the run form captures elevation and bonuses are discipline-agnostic, so run elevation earns EP too. | Widen the comment to "cycling, running, and hiking". |
+| Info | apps/web/src/db/repos/activities.ts:148-175 (test :140-164) | The endurance log test asserts distance and duration but not row.elevation_m (including the swim null case). The row shape itself is correct. | Add expect(row.elevation_m).toBe(type === "swim" ? null : 120). |
+| Info | apps/web/src/lib/activities.ts:71-73 | disciplineForActivityType has no production call site yet (plumbing for the Phase 3 heatmap EP path); mapping is test-pinned only. | Wire it when the heatmap computes EP, and keep the golden fence as the value oracle. |
+
+Check highlights (full table in the review response): scoring parity, golden fence reach
+for the new disciplines, parse consistency, EP invariance for existing values, form
+validation versus ACTIVITY_RULES, swim elevation hiding, repo row shape, pace guards and
+per-100 m math, route registration and card hrefs, dead-but-harmless `pending`, test
+coverage of mapping/summaries/repo rows, and prose conventions all PASS except the hike
+elevation coherence and the cross-form validation consistency items above.
+
+### Recurring patterns for other agents
+- Form-level constraints that no repo guard or SQL CHECK backs (nonNegative) drift across
+  sibling forms; put shared numeric constraints in the lib/forms.ts builders so RideForm
+  and EnduranceForm cannot disagree, and remember the repo guard is the floor every form
+  must meet.
+- Discipline unions live in two languages; keep the shared golden file as the fence, give
+  every new discipline at least one vector in both effortPoints and effortPointsDaily, and
+  derive parsers from the intensity table where the language allows.
+- A summary should speak every figure its form captures (hike elevation was logged but
+  never shown); when a form grows a field, walk the summary, card, and blurb surfaces with
+  it.

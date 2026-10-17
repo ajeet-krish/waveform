@@ -3,14 +3,16 @@
  * summary for that discipline's figures, and the Edit and Delete
  * actions. Climbing rows carry their send histogram, so the summary
  * speaks in sends and V-points; cycling rows speak in km, m, and
- * minutes. Delete confirms in place before the route removes the row.
+ * minutes; running and hike rows speak in duration, distance, elevation,
+ * and pace; swim rows speak duration, distance, and pace per 100 m.
+ * Delete confirms in place before the route removes the row.
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
 import type { Activity } from "@waveform/api-types";
 import type { LocalRow } from "../../db/types";
 import { climbBreakdownSummary } from "../../lib/climbing";
-import { rideSummary } from "../../lib/activitySummary";
+import { enduranceSummary, rideSummary } from "../../lib/activitySummary";
 import { errorMessage } from "../../lib/errors";
 import { formatDayHeading } from "../../lib/format";
 import ConfirmDialog from "../ConfirmDialog";
@@ -39,6 +41,20 @@ export default function ActivityCard(props: {
         elevationM: props.activity.elevation_m,
         durationMin: props.activity.duration_min,
       });
+    }
+    if (
+      props.activity.type === "running" ||
+      props.activity.type === "hike" ||
+      props.activity.type === "swim"
+    ) {
+      return enduranceSummary(
+        {
+          distanceKm: props.activity.distance_km,
+          elevationM: props.activity.elevation_m,
+          durationMin: props.activity.duration_min,
+        },
+        { per100m: props.activity.type === "swim" },
+      );
     }
     return rideSummary({
       distanceKm: props.activity.distance_km,

@@ -1,8 +1,7 @@
 /**
  * Activities overview: the discipline card grid. Each live discipline
- * card carries a real 30-day summary (rides in km, climbs in
- * V-points); pending disciplines keep their static note until their
- * own pages ship.
+ * card carries a real 30-day summary (rides and endurance sessions in
+ * km, climbs in V-points) and links to its own page.
  */
 
 import { A } from "@solidjs/router";
@@ -57,7 +56,8 @@ function ActivitiesView(props: { repos: Repos; today: Date }): JSX.Element {
   const windowTo = (): string => localDateString(props.today);
 
   // Climbing rows need their histograms attached so V-points total
-  // correctly; cycling rows summarize from the row itself.
+  // correctly; cycling, running, hike, and swim rows summarize distance
+  // from the row itself.
   const windowRows = createLocalQuery<DisciplineActivity[]>(async () => {
     const rows = await props.repos.activities.listByDateRange(windowFrom(), windowTo());
     const climbs = await props.repos.activities.listClimbs();
@@ -111,10 +111,6 @@ function ActivitiesView(props: { repos: Repos; today: Date }): JSX.Element {
           }
         </For>
       </div>
-      <p class="panel-note">
-        Running, hikes, and swims already log through the same entry form. Their own pages come
-        after cycling and climbing.
-      </p>
     </div>
   );
 }

@@ -6,7 +6,8 @@
 
 use std::ops::AddAssign;
 
-/// Lifting, climbing, and cycling weight minutes differently.
+/// Lifting, climbing, cycling, running, hiking, and swimming weight minutes
+/// differently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Discipline {
     /// Weightlifting sessions.
@@ -15,6 +16,12 @@ pub enum Discipline {
     Climbing,
     /// Cycling sessions.
     Cycling,
+    /// Running sessions.
+    Run,
+    /// Hiking sessions.
+    Hike,
+    /// Swimming sessions.
+    Swim,
 }
 
 impl Discipline {
@@ -24,6 +31,9 @@ impl Discipline {
             Discipline::Strength => 1.0,
             Discipline::Climbing => 1.1,
             Discipline::Cycling => 0.9,
+            Discipline::Run => 1.0,
+            Discipline::Hike => 0.7,
+            Discipline::Swim => 1.0,
         }
     }
 }
@@ -36,7 +46,7 @@ pub struct EffortBonuses {
     pub pr_count: u32,
     /// Climbing routes sent during the session.
     pub sends: u32,
-    /// Elevation gained, in meters (cycling and hiking).
+    /// Elevation gained, in meters (cycling, running, and hiking).
     pub elevation_m: f64,
 }
 
@@ -124,6 +134,9 @@ mod tests {
         assert_eq!(Discipline::Strength.intensity(), 1.0);
         assert_eq!(Discipline::Climbing.intensity(), 1.1);
         assert_eq!(Discipline::Cycling.intensity(), 0.9);
+        assert_eq!(Discipline::Run.intensity(), 1.0);
+        assert_eq!(Discipline::Hike.intensity(), 0.7);
+        assert_eq!(Discipline::Swim.intensity(), 1.0);
     }
 
     #[test]
@@ -132,6 +145,9 @@ mod tests {
         assert_approx(effort_points(60.0, Discipline::Strength, &none), 60.0);
         assert_approx(effort_points(45.0, Discipline::Climbing, &none), 49.5);
         assert_approx(effort_points(90.0, Discipline::Cycling, &none), 81.0);
+        assert_approx(effort_points(60.0, Discipline::Run, &none), 60.0);
+        assert_approx(effort_points(60.0, Discipline::Hike, &none), 42.0);
+        assert_approx(effort_points(45.0, Discipline::Swim, &none), 45.0);
     }
 
     #[test]

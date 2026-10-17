@@ -34,6 +34,17 @@ export const ACTIVITY_RULES = {
 } as const;
 
 /**
+ * Non-negative floors for distance_km and elevation_m. Both columns are
+ * nullable but never negative. Unlike the ACTIVITY_RULES bounds these are
+ * client-only: migrations/0001_init.sql carries no CHECK on either
+ * column, so this guard is the floor every activity form and repo write
+ * must meet. Kept out of ACTIVITY_RULES so the `RULE_CONSTANTS` parity
+ * fence stays exact.
+ */
+export const ACTIVITY_DISTANCE_KM_MIN = 0;
+export const ACTIVITY_ELEVATION_M_MIN = 0;
+
+/**
  * The body_stats CHECK bounds (migrations/0003_hardening.sql). Body
  * weight must be strictly positive; 0 kg is not a plausible human weight
  * and the CHECK says so, unlike set weights which allow 0 for
@@ -210,7 +221,7 @@ function finiteOrNullIssue(
  * activities: local_date is a bare calendar day, duration_min null or
  * 0..1440, climb_grade_value null or 0..16 (the V-scale clamp), and
  * routes_sent null or >= 0. distance_km and elevation_m must be null or
- * finite.
+ * finite and non-negative.
  */
 export function assertValidActivity(activity: ActivityCheck): void {
   const issues: string[] = [];
@@ -229,11 +240,25 @@ export function assertValidActivity(activity: ActivityCheck): void {
       );
     }
   }
-  if (activity.distance_km !== null && !Number.isFinite(activity.distance_km)) {
-    issues.push(`distance_km must be null or a finite number (got ${activity.distance_km})`);
+  if (activity.distance_km !== null) {
+    if (
+      !Number.isFinite(activity.distance_km) ||
+      activity.distance_km < ACTIVITY_DISTANCE_KM_MIN
+    ) {
+      issues.push(
+        `distance_km must be null or >= ${ACTIVITY_DISTANCE_KM_MIN} (got ${activity.distance_km})`,
+      );
+    }
   }
-  if (activity.elevation_m !== null && !Number.isFinite(activity.elevation_m)) {
-    issues.push(`elevation_m must be null or a finite number (got ${activity.elevation_m})`);
+  if (activity.elevation_m !== null) {
+    if (
+      !Number.isFinite(activity.elevation_m) ||
+      activity.elevation_m < ACTIVITY_ELEVATION_M_MIN
+    ) {
+      issues.push(
+        `elevation_m must be null or >= ${ACTIVITY_ELEVATION_M_MIN} (got ${activity.elevation_m})`,
+      );
+    }
   }
   if (activity.climb_grade_value !== null) {
     if (

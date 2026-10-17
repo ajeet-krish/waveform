@@ -9,7 +9,13 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import { ACTIVITY_RULES, BODY_RULES, SET_RULES } from "../db/validation";
+import {
+  ACTIVITY_DISTANCE_KM_MIN,
+  ACTIVITY_ELEVATION_M_MIN,
+  ACTIVITY_RULES,
+  BODY_RULES,
+  SET_RULES,
+} from "../db/validation";
 
 /** idle until the first submit, then saving, saved, or error. */
 export type FormStatus = "idle" | "saving" | "saved" | "error";
@@ -203,21 +209,44 @@ export function createDurationField(
   });
 }
 
-/** distance_km validator: finite, or empty for null. */
+/**
+ * The endurance duration validator: like createDurationField but the box
+ * is required, so empty input is rejected. duration_min is nullable in
+ * the schema, but an endurance session with no time on the clock is not a
+ * session; this is the product stance EnduranceForm documents.
+ */
+export function createRequiredDurationField(
+  options: { initial?: number | null } = {},
+): FieldSpec<OptionalNumberInput, number | null> {
+  const duration = createDurationField(options);
+  return {
+    ...duration,
+    validate(value: number | null): string | null {
+      if (value === null) {
+        return "Enter the duration in minutes.";
+      }
+      return duration.validate(value);
+    },
+  };
+}
+
+/** distance_km validator: finite and >= 0, or empty for null. */
 export function createDistanceKmField(
   options: { initial?: number | null } = {},
 ): FieldSpec<OptionalNumberInput, number | null> {
   return createOptionalNumberField({
     initial: options.initial ?? null,
+    min: ACTIVITY_DISTANCE_KM_MIN,
   });
 }
 
-/** elevation_m validator: finite, or empty for null. */
+/** elevation_m validator: finite and >= 0, or empty for null. */
 export function createElevationField(
   options: { initial?: number | null } = {},
 ): FieldSpec<OptionalNumberInput, number | null> {
   return createOptionalNumberField({
     initial: options.initial ?? null,
+    min: ACTIVITY_ELEVATION_M_MIN,
   });
 }
 

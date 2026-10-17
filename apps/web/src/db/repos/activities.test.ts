@@ -137,6 +137,32 @@ describe("activities repo", () => {
     expect(ops[0]?.entity).toBe("activities");
   });
 
+  it("logs running, hike, and swim with null climb fields and no climb_sends row", async () => {
+    const { db, repos } = harness("endurance");
+    for (const type of ["running", "hike", "swim"] as const) {
+      const { row, sends } = await repos.activities.logActivity({
+        type,
+        local_date: "2026-10-14",
+        distance_km: 5.5,
+        elevation_m: type === "swim" ? null : 120,
+        duration_min: 40,
+      });
+
+      expect(row.type).toBe(type);
+      expect(row.climb_grade).toBeNull();
+      expect(row.climb_grade_value).toBeNull();
+      expect(row.routes_sent).toBeNull();
+      expect(row.distance_km).toBe(5.5);
+      expect(row.duration_min).toBe(40);
+      expect(sends).toBeUndefined();
+      expect(await db.climb_sends.get(row.id)).toBeUndefined();
+    }
+
+    const ops = await db.outbox.toArray();
+    expect(ops).toHaveLength(3);
+    expect(ops.every((op) => op.entity === "activities")).toBe(true);
+  });
+
   it("derives null grades and routes_sent 0 from an empty histogram", async () => {
     const { repos } = harness("climb-empty");
     const { row } = await repos.activities.logActivity({

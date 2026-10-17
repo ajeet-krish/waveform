@@ -38,12 +38,18 @@ describe("disciplineIntensity", () => {
     expect(disciplineIntensity("strength")).toBe(1.0);
     expect(disciplineIntensity("climbing")).toBe(1.1);
     expect(disciplineIntensity("cycling")).toBe(0.9);
+    expect(disciplineIntensity("run")).toBe(1.0);
+    expect(disciplineIntensity("hike")).toBe(0.7);
+    expect(disciplineIntensity("swim")).toBe(1.0);
   });
 
   it("parses discipline strings and rejects unknown ones", () => {
     expect(parseDiscipline("strength")).toBe("strength");
     expect(parseDiscipline("climbing")).toBe("climbing");
     expect(parseDiscipline("cycling")).toBe("cycling");
+    expect(parseDiscipline("run")).toBe("run");
+    expect(parseDiscipline("hike")).toBe("hike");
+    expect(parseDiscipline("swim")).toBe("swim");
     expect(() => parseDiscipline("rowing")).toThrow("unknown discipline");
   });
 });
@@ -53,10 +59,13 @@ describe("effortPoints", () => {
     assertApprox(effortPoints(60, "strength", NONE), 60.0, 1e-9);
     assertApprox(effortPoints(45, "climbing", NONE), 49.5, 1e-9);
     assertApprox(effortPoints(90, "cycling", NONE), 81.0, 1e-9);
+    assertApprox(effortPoints(60, "run", NONE), 60.0, 1e-9);
+    assertApprox(effortPoints(60, "hike", NONE), 42.0, 1e-9);
+    assertApprox(effortPoints(45, "swim", NONE), 45.0, 1e-9);
   });
 
   it("scores zero minutes across every discipline at zero", () => {
-    for (const discipline of ["strength", "climbing", "cycling"] as const) {
+    for (const discipline of ["strength", "climbing", "cycling", "run", "hike", "swim"] as const) {
       expect(effortPoints(0, discipline, NONE)).toBe(0);
     }
   });
@@ -70,6 +79,9 @@ describe("effortPoints", () => {
     assertApprox(effortPoints(60, "strength", NONE), 60.0, 1e-9);
     assertApprox(effortPoints(60, "climbing", NONE), 66.0, 1e-9);
     assertApprox(effortPoints(60, "cycling", NONE), 54.0, 1e-9);
+    assertApprox(effortPoints(60, "run", NONE), 60.0, 1e-9);
+    assertApprox(effortPoints(60, "hike", NONE), 42.0, 1e-9);
+    assertApprox(effortPoints(60, "swim", NONE), 60.0, 1e-9);
     assertApprox(effortPoints(90.9, "strength", NONE), 90.9, 1e-9);
     assertApprox(effortPoints(1.0, "climbing", NONE), 1.1, 1e-9);
   });
@@ -109,8 +121,20 @@ describe("effortPoints", () => {
     expect(effortPoints(30, "cycling", negativeElevation)).toBe(27);
   });
 
+  it("treats NaN minutes and NaN bonus elevation as zero, matching Rust", () => {
+    // Rust f64::max(NaN, 0.0) is 0.0; JS Math.max(NaN, 0) is NaN, so the
+    // clamp is explicit. The golden file fences the same values.
+    expect(effortPoints(Number.NaN, "strength", NONE)).toBe(0);
+    const nanElevation: EffortBonuses = { prCount: 0, sends: 0, elevationM: Number.NaN };
+    assertApprox(effortPoints(30, "cycling", nanElevation), 27.0, 1e-9);
+    // Infinity still passes through, matching Rust.
+    expect(effortPoints(Number.POSITIVE_INFINITY, "strength", NONE)).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+  });
+
   it("is monotonic in minutes", () => {
-    for (const discipline of ["strength", "climbing", "cycling"] as const) {
+    for (const discipline of ["strength", "climbing", "cycling", "run", "hike", "swim"] as const) {
       let previous = effortPoints(0, discipline, NONE);
       for (let step = 1; step <= 50; step += 1) {
         const minutes = step * 3.7;
@@ -168,7 +192,7 @@ describe("effortPointsDaily", () => {
 
   it("keeps every day inside the 0 to 100 band", () => {
     for (const minutes of [0, 1, 45, 90, 600, -30]) {
-      for (const discipline of ["strength", "climbing", "cycling"] as const) {
+      for (const discipline of ["strength", "climbing", "cycling", "run", "hike", "swim"] as const) {
         for (const sends of [0, 7, 500]) {
           const day = [
             session(minutes, discipline, { prCount: 3, sends, elevationM: 850 }),
